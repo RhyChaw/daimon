@@ -50,6 +50,23 @@ prompt is the gate. At v1 it becomes Touch ID.
 
 Every action is appended to `audit.jsonl`.
 
+## Daimon.app (standalone bundle)
+
+Package as a signed macOS app so Calendar / Mail automation and Touch ID are
+attributed to **Daimon** (`com.rhychaw.daimon`), not Terminal or Cursor.
+
+```bash
+./scripts/build_app.sh
+open dist/Daimon.app
+```
+
+Requirements: Ollama running locally. The app stores data in
+`~/Library/Application Support/Daimon/`.
+
+Risky actions (`send_email`) use **Touch ID** (passcode fallback) via
+LocalAuthentication — no terminal y/N in the `.app`. Dev CLI (`macagent start`)
+still works as before; Touch ID is used when pyobjc is installed, otherwise y/N.
+
 ## What's where
 
 | File | Role |
@@ -60,6 +77,10 @@ Every action is appended to `audit.jsonl`.
 | `mac_agent/agent.py` | the loop: propose → check → gate → execute → log |
 | `mac_agent/ollama_client.py` | talks to the local Ollama server |
 | `mac_agent/cli.py` | `macagent start` |
+| `mac_agent/app_main.py` | py2app entry for `Daimon.app` |
+| `mac_agent/console_ui.py` | Cocoa console window for the bundled app |
+| `setup_app.py` | py2app build config + Info.plist usage strings |
+| `scripts/build_app.sh` | build + ad-hoc codesign |
 
 ## Build order
 

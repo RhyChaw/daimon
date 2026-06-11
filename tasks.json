@@ -1,0 +1,37 @@
+{
+  "_comment": "Facts are the key->value store both memory arms share. The advisor email is deliberately NOT here — it lives ONLY in a buried seed event, so only query-relevant recall (palace) can surface it.",
+  "facts": {
+    "prof": "kevin@edu",
+    "temp_unit": "Celsius",
+    "location": "Waterloo"
+  },
+
+  "_comment2": "Seed episodic history. The advisor/thesis event is event #2 of 9, so it is NOT in the last 3 — arm B (fixed last-3) cannot see it; arm C (query recall) can.",
+  "seed_events": [
+    {"task": "draft an email to me about lunch",            "action": "draft_email", "agent_notes": "drafted email to me@x.com about lunch"},
+    {"task": "email my advisor about the thesis proposal",  "action": "draft_email", "agent_notes": "drafted email to advisor sarah@uni.edu about thesis proposal"},
+    {"task": "say good morning",                            "action": "say",         "agent_notes": "said good morning"},
+    {"task": "open github",                                 "action": "open_url",    "agent_notes": "opened github.com"},
+    {"task": "what's the weather",                          "action": "get_weather", "agent_notes": "fetched weather for Waterloo"},
+    {"task": "say hello",                                   "action": "say",         "agent_notes": "said hello"},
+    {"task": "how's my day",                                "action": "read_calendar","agent_notes": "read calendar, no events"},
+    {"task": "say goodbye",                                 "action": "say",         "agent_notes": "said goodbye"},
+    {"task": "open hacker news",                            "action": "open_url",    "agent_notes": "opened news.ycombinator.com"}
+  ],
+
+  "tasks": [
+    {"id": "ctrl_say",        "category": "control-routing",   "request": "say good morning",                          "expect": {"action": "say"}},
+    {"id": "ctrl_open",       "category": "control-routing",   "request": "open hacker news",                          "expect": {"action": "open_url"}},
+    {"id": "ctrl_weather",    "category": "control-routing",   "request": "what's the weather",                        "expect": {"action": "get_weather"}},
+    {"id": "ctrl_cal",        "category": "control-routing",   "request": "what does my day look like today",          "expect": {"action": "read_calendar"}},
+    {"id": "ctrl_thanks",     "category": "control-routing",   "request": "say thank you",                             "expect": {"action": "say"}},
+
+    {"id": "fact_prof_draft", "category": "fact-resolution",   "request": "draft an email to my prof about missing class", "expect": {"action": "draft_email", "args_contains": {"to": "kevin@edu"}}},
+    {"id": "fact_prof_email", "category": "fact-resolution",   "request": "what is my prof's email",                   "expect": {"say_contains": "kevin@edu"}},
+
+    {"id": "epi_advisor_email","category": "buried-episodic",  "request": "what is my advisor's email",                "expect": {"say_contains": "sarah@uni.edu"}},
+    {"id": "epi_advisor_draft","category": "buried-episodic",  "request": "draft an email to my advisor about my thesis", "expect": {"action": "draft_email", "args_contains": {"to": "sarah@uni.edu"}}},
+
+    {"id": "para_temp_unit",  "category": "paraphrase-ceiling", "request": "what unit do you show temperature in",     "expect": {"say_contains": "celsius"}}
+  ]
+}
