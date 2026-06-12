@@ -15,7 +15,7 @@ PLIST = {
     "LSMinimumSystemVersion": "12.0",
     "NSHighResolutionCapable": True,
     "NSAppleEventsUsageDescription": (
-        "Daimon controls Mail and Calendar to draft emails and read your schedule."
+        "Daimon controls Mail, Calendar, and Spotify to draft emails, read your schedule, and play music."
     ),
     "NSCalendarsUsageDescription": (
         "Daimon reads today's calendar events when you ask about your schedule."
@@ -31,8 +31,10 @@ OPTIONS = {
         "includes": [
             "LocalAuthentication",
             "AppKit",
+            "ApplicationServices",
             "Foundation",
             "PyObjCTools.AppHelper",
+            "Quartz",
         ],
         # Avoid strip invalidating signatures mid-build (py2app re-signs after).
         "strip": False,

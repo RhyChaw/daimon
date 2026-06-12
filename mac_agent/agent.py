@@ -61,7 +61,11 @@ def _system_prompt():
     lines.append('For greetings and chat (hi, hello, how are you), use say with a friendly helpful reply.')
     lines.append('If the request does not fit an action, use "say" to ask a clarifying question.')
     lines.append('When the user says "remember …", use remember to store the fact (key + value).')
-    lines.append("If Known facts show a contact with no email on file, use say to ask for their email — never draft_email or send_email until an address is known.")
+    lines.append(
+        "If Known facts show a contact with no email on file, use say to ask for their email — "
+        "never draft_email or send_email until an address is known. "
+        "NEVER ask for email for Spotify, music, or play_music requests."
+    )
     lines.append("If the message includes a Recently or Past similar line and the user asks what you did before, use say to answer from those events.")
     lines.append(
         "For schedule or calendar questions, always use read_calendar — never invent events or answer from Recently lines. "
@@ -79,7 +83,8 @@ def _system_prompt():
         "For compound requests (e.g. weather AND calendar), call each needed tool, then one combined say."
     )
     lines.append(
-        'To open an app and play music: open_app first, then play_music with the track query, then say.'
+        "For Spotify or play requests: use play_music with the song query (no email needed). "
+        "Then say to confirm. Do not use open_app for Spotify when play_music handles it."
     )
     lines.append("Output nothing except the JSON object.")
     return "\n".join(lines)
@@ -153,6 +158,198 @@ def _save_remember(task, key, value):
     print(f"  saved: {key} → {value}")
     log(action="remember", args={"key": key, "value": value}, decision="allowed", ok=True)
     _episode(task, "success", "remember", {"key": key, "value": value}, f"remembered {key}")
+
+
+_APP_ALIASES = {
+    "calendar": "Calendar",
+    "google calendar": "Calendar",
+    "mail": "Mail",
+    "notes": "Notes",
+    "music": "Music",
+    "spotify": "Spotify",
+}
+
+_OPEN_AND_PLAY = re.compile(
+    r'\bopen\s+(?:the\s+)?(?:app\s+)?(.+?)\s+and\s+(?:play|search(?:\s+for)?)\s+(?:"([^"]+)"|\'([^\']+)\'|(.+?))\s*\.?\s*$',
+    re.I,
+)
+_PLAY_TRACK = re.compile(
+    r'\b(?:play|search(?:\s+for)?|listen\s+to)\s+(?:"([^"]+)"|\'([^\']+)\'|(.+?))(?:\s+on\s+spotify)?\s*\.?\s*$',
+    re.I,
+)
+_SPOTIFY_PLAY = re.compile(
+    r'\bspotify\s+(?:play|search(?:\s+for)?)\s+(?:"([^"]+)"|\'([^\']+)\'|(.+?))\s*\.?\s*$',
+    re.I,
+)
+_BUNDLED_OPEN_PLAY = re.compile(
+    r'^(.+?)\s+and\s+play\s+(?:"([^"]+)"|\'([^\']+)\'|(.+?))\s*\.?\s*$',
+    re.I,
+)
+
+
+def _normalize_app_name(raw):
+    name = str(raw).strip()
+    if not name:
+        return name
+    key = re.sub(r"^my\s+", "", name, flags=re.I).strip().lower()
+    return _APP_ALIASES.get(key, _APP_ALIASES.get(name.lower(), name))
+
+
+def _music_app_for(app_name):
+    return "Spotify" if str(app_name).strip().lower() == "spotify" else app_name
+
+
+def _is_recent_track(track):
+    return actions_mod._is_recent_play_query(track)
+
+
+_PLAY_RECENT = re.compile(
+    r"\b(?:play\s+again|play\s+(?:my\s+)?(?:most\s+recent|last|latest)(?:\s+(?:song|track))?)\b",
+    re.I,
+)
+
+
+def _run_play_recent(user_text, app_name="Spotify"):
+    music_app = _music_app_for(app_name)
+    plan = [
+        ("play_music", {"query": "recent", "app_name": music_app}),
+        ("say", {"text": f"Playing your most recent song on {music_app}."}),
+    ]
+    for action, args in plan:
+        outcome = _execute_step(user_text, action, args)
+        if outcome.status in ("done", "abort"):
+            return True
+    return True
+
+
+def _try_play_recent(user_text):
+    if not _PLAY_RECENT.search(user_text):
+        return False
+    if re.search(r"\bopen\b.+\band\s+play\b", user_text, re.I):
+        return False
+    return _run_play_recent(user_text, "Spotify")
+
+
+def _track_from_groups(match, start=1):
+    if not match:
+        return None
+    track = (
+        match.group(start)
+        or match.group(start + 1)
+        or match.group(start + 2)
+        or ""
+    ).strip().rstrip(".")
+    return track or None
+
+
+def _extract_play_track(user_text):
+    text = user_text.strip()
+    track = _track_from_groups(_OPEN_AND_PLAY.search(text), start=2)
+    if track:
+        return track
+    for pattern in (_PLAY_TRACK, _SPOTIFY_PLAY):
+        track = _track_from_groups(pattern.search(text))
+        if track:
+            return track
+    m = re.search(
+        r'\bopen\s+spotify\b.*?\b(?:play|search(?:\s+for)?)\s+(?:"([^"]+)"|\'([^\']+)\'|(.+?))\s*\.?\s*$',
+        user_text.strip(),
+        re.I | re.S,
+    )
+    return _track_from_groups(m)
+
+
+def _music_intent(user_text):
+    text = user_text.lower()
+    if _extract_play_track(user_text):
+        return True
+    if _PLAY_RECENT.search(user_text):
+        return True
+    return bool(
+        re.search(r"\bspotify\b", text)
+        and re.search(r"\b(play|search|listen)\b", text)
+    )
+
+
+def _parse_open_and_play(user_text):
+    m = _OPEN_AND_PLAY.search(user_text.strip())
+    if not m:
+        return None
+    app_name = _normalize_app_name(m.group(1))
+    track = _track_from_groups(m, start=2)
+    if not app_name or not track:
+        return None
+    return app_name, track
+
+
+def _split_bundled_open_play(app_name):
+    m = _BUNDLED_OPEN_PLAY.match(str(app_name).strip())
+    if not m:
+        return None
+    app = _normalize_app_name(m.group(1))
+    track = _track_from_groups(m, start=2)
+    if not app or not track:
+        return None
+    return app, track
+
+
+def _run_open_and_play(user_text, app_name, track):
+    music_app = _music_app_for(app_name)
+    # play_music activates Spotify and drives search via keyboard — skip open_app so TTS doesn't steal focus.
+    plan = [
+        ("play_music", {"query": track, "app_name": music_app}),
+        ("say", {"text": f"Playing {track} on {music_app}."}),
+    ]
+    for action, args in plan:
+        outcome = _execute_step(user_text, action, args)
+        if outcome.status in ("done", "abort"):
+            return True
+    return True
+
+
+def _try_open_and_play(user_text):
+    parsed = _parse_open_and_play(user_text)
+    if not parsed:
+        return False
+    app_name, track = parsed
+    if _is_recent_track(track):
+        return _run_play_recent(user_text, app_name)
+    return _run_open_and_play(user_text, app_name, track)
+
+
+def _try_spotify_play(user_text):
+    if not _music_intent(user_text):
+        return False
+    track = _extract_play_track(user_text)
+    if not track:
+        return False
+    if _is_recent_track(track):
+        return _run_play_recent(user_text)
+    return _run_open_and_play(user_text, "Spotify", track)
+
+
+def _music_play_pending(user_text, steps):
+    if not _music_intent(user_text):
+        return None
+    if any("play_music" in entry for entry in steps):
+        return None
+    return _extract_play_track(user_text)
+
+
+def _redirect_music_action(user_text, steps, action, args):
+    """If the model picked open_app/say instead of play_music, fix the plan."""
+    track = _music_play_pending(user_text, steps)
+    if not track:
+        return action, args
+    query = "recent" if _is_recent_track(track) else track
+    play_args = {"query": query, "app_name": "Spotify"}
+    if action == "say":
+        return "play_music", play_args
+    if action == "open_app":
+        app = str(args.get("app_name", "")).strip().lower()
+        if app in ("spotify",) or _normalize_app_name(app).lower() == "spotify":
+            return "play_music", play_args
+    return action, args
 
 
 def _try_direct_say(user_text):
@@ -468,7 +665,16 @@ def handle(user_text, backend):
     if _try_direct_say(user_text):
         return
 
-    if _email_intent(user_text):
+    if _try_open_and_play(user_text):
+        return
+
+    if _try_play_recent(user_text):
+        return
+
+    if _try_spotify_play(user_text):
+        return
+
+    if _email_intent(user_text) and not _music_intent(user_text):
         for key in memory.recalled_keys_missing_email(user_text):
             label = memory.contact_label(key)
             _ask_for_email(label)
@@ -511,6 +717,13 @@ def handle(user_text, backend):
 
         coerced = _coerce_action_args(action, args, user_text)
 
+        if action == "open_app" and coerced != (None, None):
+            bundled = _split_bundled_open_play(coerced[1].get("app_name", ""))
+            if bundled:
+                app_name, track = bundled
+                _run_open_and_play(user_text, app_name, track)
+                return
+
         if coerced == (None, None):
             if ACTION_SCHEMA.get(action) is None:
                 print(f"  [rejected] unknown action: {action!r}")
@@ -523,6 +736,13 @@ def handle(user_text, backend):
             return
 
         action, args = coerced
+        action, args = _redirect_music_action(user_text, steps, action, args)
+        if action == "play_music":
+            spec = ACTION_SCHEMA["play_music"]
+            args = _coerce_args(spec, args)
+            if not _valid_args(spec, args):
+                print(f"  [rejected] wrong args for play_music: {list(args)}")
+                return
         outcome = _execute_step(user_text, action, args)
         if outcome.status == "done":
             return

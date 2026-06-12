@@ -17,10 +17,12 @@ Each verb has:
   - desc:    one line, also shown to the model so it knows what's available
 """
 
+import re
 import subprocess
 import urllib.parse
 
 from . import memory
+from .keystrokes import AccessibilityRequired, play_spotify_recent, play_spotify_search
 from .resources import script_path
 from .senses import get_weather, read_calendar
 from .speech import speak as _speak_async
@@ -45,22 +47,34 @@ def _open_app(app_name):
     _speak_async(f"Opened {app_name}.")
 
 
-def _escape_applescript(text):
-    return str(text).replace("\\", "\\\\").replace('"', '\\"')
+_RECENT_PLAY_QUERIES = frozenset({"recent", "last", "latest", "again"})
+
+
+def _is_recent_play_query(query):
+    q = str(query or "").strip().lower().rstrip(".")
+    if not q:
+        return False
+    if q in _RECENT_PLAY_QUERIES:
+        return True
+    return bool(re.match(r"^(?:my\s+)?(?:most\s+recent|last|latest)(?:\s+(?:song|track))?$", q, re.I))
 
 
 def _play_music(query, app_name="Spotify"):
-    query = str(query).strip()
     app_name = str(app_name or "Spotify").strip()
-    if not query:
-        raise ValueError("query required")
-    if not app_name or "/" in app_name or app_name.startswith("-"):
-        raise ValueError("invalid app name")
-    script = (
-        f'tell application "{_escape_applescript(app_name)}" to activate\n'
-        f'tell application "{_escape_applescript(app_name)}" to play track "{_escape_applescript(query)}"'
-    )
-    subprocess.run(["osascript", "-e", script], check=True)
+    if app_name.lower() != "spotify":
+        raise ValueError("play_music UI automation currently supports Spotify only")
+    try:
+        if _is_recent_play_query(query):
+            play_spotify_recent()
+        else:
+            query = str(query).strip()
+            if not query:
+                raise ValueError("query required")
+            play_spotify_search(query)
+    except AccessibilityRequired:
+        raise
+    except Exception as e:
+        raise RuntimeError(str(e)) from e
 
 
 def _draft_email(to, subject, body):
@@ -100,7 +114,7 @@ ACTION_SCHEMA = {
     "say":            {"risk": "auto",    "args": ["text"],                 "handler": _say,            "desc": "speak text aloud"},
     "open_url":       {"risk": "auto",    "args": ["url"],                  "handler": _open_url,       "desc": "open an http/https URL in the browser"},
     "open_app":       {"risk": "auto",    "args": ["app_name"],             "handler": _open_app,       "desc": "open a Mac application by name (e.g. Spotify, Notes, Calendar)"},
-    "play_music":     {"risk": "auto",    "args": ["query", "app_name"],    "handler": _play_music_action, "desc": "play a song or track in a music app (default Spotify)", "optional_args": ["app_name"]},
+    "play_music":     {"risk": "auto",    "args": ["query", "app_name"],    "handler": _play_music_action, "desc": "play in Spotify: pass a track query to search, or query 'recent' for most recent song", "optional_args": ["app_name"]},
     "draft_email":    {"risk": "auto",    "args": ["to", "subject", "body"], "handler": _draft_email,    "desc": "create a visible email draft (does NOT send)"},
     "send_email":     {"risk": "confirm", "args": ["to", "subject", "body"], "handler": _send_email,     "desc": "send an email (irreversible; requires Touch ID)"},
     "remember":       {"risk": "auto",    "args": ["key", "value"],          "handler": _remember,       "desc": "save a personal fact the user stated (e.g. prof → contact) for later recall"},

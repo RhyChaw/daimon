@@ -45,17 +45,46 @@ def install_cli():
     return 0
 
 
+def _bundle_mtime(app):
+    binary = app / "Contents" / "MacOS" / "Daimon"
+    if binary.is_file():
+        return binary.stat().st_mtime
+    if app.is_dir():
+        return app.stat().st_mtime
+    return 0
+
+
+def _source_mtime(root):
+    latest = 0.0
+    for rel in ("setup_app.py", "pyproject.toml"):
+        path = root / rel
+        if path.is_file():
+            latest = max(latest, path.stat().st_mtime)
+    pkg = root / "mac_agent"
+    if pkg.is_dir():
+        for path in pkg.rglob("*.py"):
+            if path.is_file():
+                latest = max(latest, path.stat().st_mtime)
+    return latest
+
+
+def _app_is_stale(root, app):
+    if not app.is_dir():
+        return True
+    return _source_mtime(root) > _bundle_mtime(app)
+
+
 def ensure_app(root):
     app = root / "dist" / "Daimon.app"
-    if app.is_dir():
-        return app
     build = root / "scripts" / "build_app.sh"
     if not build.is_file():
         raise SystemExit(f"No {app} and no {build}")
-    print(f"Building {app.name}…")
-    subprocess.run([str(build)], cwd=root, check=True)
-    if not app.is_dir():
-        raise SystemExit(f"Build finished but {app} is missing")
+    if _app_is_stale(root, app):
+        reason = "missing" if not app.is_dir() else "source changed"
+        print(f"Building {app.name} ({reason})…")
+        subprocess.run([str(build)], cwd=root, check=True)
+        if not app.is_dir():
+            raise SystemExit(f"Build finished but {app} is missing")
     return app
 
 
