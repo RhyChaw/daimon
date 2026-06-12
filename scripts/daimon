@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve symlinks so ~/.local/bin/daimon -> repo/scripts/daimon still finds the repo.
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "${SOURCE}" ]]; do
+  DIR="$(cd "$(dirname "${SOURCE}")" && pwd)"
+  SOURCE="$(readlink "${SOURCE}")"
+  [[ "${SOURCE}" != /* ]] && SOURCE="${DIR}/${SOURCE}"
+done
+ROOT="$(cd "$(dirname "${SOURCE}")/.." && pwd)"
+
+if [[ -x "${ROOT}/.venv/bin/python" ]]; then
+  exec "${ROOT}/.venv/bin/python" -m mac_agent.launcher "$@"
+fi
+
+echo "Missing ${ROOT}/.venv — run:" >&2
+echo "  cd ${ROOT} && python3 -m venv .venv && source .venv/bin/activate && pip install -e '.[app]'" >&2
+exit 1

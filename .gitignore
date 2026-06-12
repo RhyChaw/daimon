@@ -1,3 +1,4 @@
+.env
 memory.json
 audit.jsonl
 eval-mem/

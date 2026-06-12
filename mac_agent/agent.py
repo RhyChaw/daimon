@@ -1,21 +1,19 @@
 """
 agent.py — the core loop.
 
-  you type  ->  local model proposes ONE action  ->  whitelist check
-            ->  gate (if risky)  ->  execute  ->  audit log  ->  repeat
+  you type  ->  model proposes an action  ->  whitelist  ->  gate  ->  execute
+            ->  append result to step history  ->  next action  ->  …  ->  say
 
-The model never touches your system directly. It can only *propose* a verb from
-the whitelist; this code is what actually runs anything.
+The model never touches your system directly. It can only *propose* verbs from
+the whitelist; this code is what actually runs anything. say ends the turn.
 """
 
 import json
-import os
 import re
-from urllib.error import HTTPError
 
 from . import actions as actions_mod
 from .actions import ACTION_SCHEMA
-from .ollama_client import chat, parse_action, resolve_model
+from .backend import BackendError, create_backend, parse_action
 from .gate import allow
 from .audit import log
 from . import memory
@@ -24,8 +22,8 @@ from . import palace_memory
 from . import clock
 from .senses import NeedsUserInput, ToolResult
 
-DEFAULT_MODEL = "llama3.2"
-FALLBACK_MODELS = ("llama3.1:latest", "llama3.1:8b", "llama3:latest")
+MAX_AGENT_STEPS = 5
+
 _PROMPT_PREFIX = re.compile(r"^(?:you\s*>\s*)+", re.I)
 _SMART_APOS = str.maketrans({
     "\u2018": "'",
@@ -51,26 +49,6 @@ def _normalize_args(args):
     return {key: _normalize_text(val) for key, val in args.items()}
 
 
-def _pick_model():
-    requested = os.environ.get("MACAGENT_MODEL", DEFAULT_MODEL)
-    resolved, available = resolve_model(requested)
-    if resolved:
-        return resolved
-    for candidate in FALLBACK_MODELS:
-        resolved, _ = resolve_model(candidate)
-        if resolved:
-            print(f"  note: {requested!r} not installed — using {resolved!r}")
-            print(f"        (run `ollama pull {requested}` to use the default)")
-            return resolved
-    print(f"Model {requested!r} not found.")
-    if available:
-        print(f"  available: {', '.join(available)}")
-    else:
-        print("  no models installed.")
-    print(f"  run: ollama pull {requested}")
-    return None
-
-
 def _system_prompt():
     lines = [
         "You control a Mac through a FIXED set of actions.",
@@ -90,7 +68,19 @@ def _system_prompt():
         "read_calendar returns only today's remaining events (after the current time)."
     )
     lines.append("For weather questions, always use get_weather — never invent temperatures or answer from Recently lines.")
-    lines.append("After a tool returns data, you will be asked to summarize it with say — use only the provided data.")
+    lines.append(
+        "You may chain several actions before responding. Tool actions (get_weather, read_calendar) return "
+        "data shown in step history — use only that data in your final answer."
+    )
+    lines.append(
+        'Use say only when you are ready to respond to the user and STOP. say is always the last action in a turn.'
+    )
+    lines.append(
+        "For compound requests (e.g. weather AND calendar), call each needed tool, then one combined say."
+    )
+    lines.append(
+        'To open an app and play music: open_app first, then play_music with the track query, then say.'
+    )
     lines.append("Output nothing except the JSON object.")
     return "\n".join(lines)
 
@@ -99,10 +89,42 @@ def _email_intent(text):
     return bool(re.search(r"\b(email|draft|send|mail)\b", text, re.I))
 
 
+_WEATHER_IN = re.compile(
+    r"\b(?:weather|temperature|forecast|temp)\s+(?:in|for|at)\s+([^?.]+)",
+    re.I,
+)
+_WEATHER_LOC = re.compile(
+    r"\b(?:in|for|at)\s+([A-Za-z][A-Za-z\s,'-]+?)(?:\?|$|today|tonight|right now)",
+    re.I,
+)
+
+
+def _parse_weather_location(text):
+    for pattern in (_WEATHER_IN, _WEATHER_LOC):
+        m = pattern.search(text)
+        if not m:
+            continue
+        loc = m.group(1).strip().rstrip(".,!?")
+        loc = re.sub(r"\b(today|tonight|right now|like|please)\b", "", loc, flags=re.I).strip()
+        if loc and loc.lower() not in {"my location", "here", "local"}:
+            return loc
+    return None
+
+
+def _weather_args(user_text):
+    loc = _parse_weather_location(user_text)
+    return {"location": loc} if loc else {}
+
+
 def _sense_action(text):
     if re.search(r"\b(weather|temperature|temp\b|rain|snow|forecast|humid|wind)\b", text, re.I):
         return "get_weather"
-    if re.search(r"\b(calendar|schedule|my day|today'?s events|meetings|agenda|how'?s my day)\b", text, re.I):
+    if re.search(
+        r"\b(calendar|schedule|my day|today|meetings|agenda|poker|club|event|"
+        r"do i have|am i|got)\b",
+        text,
+        re.I,
+    ):
         return "read_calendar"
     return None
 
@@ -162,10 +184,28 @@ _IGNORE = re.compile(
     r"(?:ignore|skip|don'?t\s+(?:show|include))\s+(?:the\s+)?(.+)",
     re.I,
 )
+_MULTI_CAL_IGNORE = re.compile(
+    r"^(.+?)\s+(?:are\s+)?(?:in\s+)?(?:a\s+)?different\s+calendar.*?\bignore\b",
+    re.I,
+)
+
+
+def _split_ignore_keys(text):
+    text = text.strip().rstrip(".")
+    return [p.strip() for p in re.split(r"\s+and\s+", text, flags=re.I) if p.strip()]
 
 
 def _try_status_update(user_text):
     """Deterministic finished/ignore updates (no model round-trip)."""
+    m = _MULTI_CAL_IGNORE.search(user_text)
+    if m:
+        keys = _split_ignore_keys(m.group(1))
+        for key in keys:
+            _save_remember(user_text, key, "ignore")
+        if keys:
+            joined = " and ".join(keys)
+            _say(f"Okay — I'll ignore {joined} on your schedule.")
+            return True
     m = _FINISH.search(user_text)
     if m:
         key = m.group(1).strip().rstrip(".")
@@ -203,6 +243,20 @@ def _resolve_recipient(to):
     return memory.resolve_to(to)
 
 
+def _coerce_args(spec, args):
+    allowed = set(spec["args"])
+    out = {}
+    for key, val in args.items():
+        if key not in allowed or val is None:
+            continue
+        if isinstance(val, str):
+            val = val.strip()
+            if not val:
+                continue
+        out[key] = val
+    return out
+
+
 def _valid_args(spec, args):
     allowed = set(spec["args"])
     optional = set(spec.get("optional_args", []))
@@ -211,23 +265,44 @@ def _valid_args(spec, args):
     return keys <= allowed and required <= keys
 
 
-def _build_tool_followup_prompt(user_text, action, result):
-    extra = ""
-    if action == "read_calendar":
-        extra = (
-            "The tool data lists only remaining events (after Now). "
-            "Mention EVERY remaining event — do not skip, merge, or invent any.\n"
-        )
+class StepOutcome:
+    __slots__ = ("status", "history_line")
+
+    def __init__(self, status, history_line=""):
+        self.status = status  # "continue" | "done" | "abort"
+        self.history_line = history_line
+
+
+def _format_step_history(steps):
+    if not steps:
+        return ""
+    lines = ["Steps taken so far:"]
+    for i, entry in enumerate(steps, 1):
+        lines.append(f"  {i}. {entry}")
+    lines.append("")
+    lines.append("Choose the NEXT action to fulfill the request. Use say only when ready to respond and stop.")
+    return "\n".join(lines)
+
+
+def _build_step_prompt(base_prompt, steps):
+    history = _format_step_history(steps)
+    if history:
+        return f"{base_prompt}\n\n{history}"
     return (
-        f"Request: {user_text}\n\n"
-        f"Tool {action} returned:\n{result}\n\n"
-        f"{extra}"
-        "Summarize ONLY using the tool data above. Reply with a say action."
+        f"{base_prompt}\n\n"
+        "Choose the first action to fulfill the request. Use say only when ready to respond and stop."
     )
 
 
-def _run_action(user_text, model, action, args, *, tool_followup=True):
-    """Execute one whitelisted action; follow up with say when handler returns data."""
+def _tool_history_line(action, args, tool_data, ok):
+    args_json = json.dumps(args, ensure_ascii=False)
+    if ok:
+        return f"{action}({args_json}) returned:\n{tool_data}"
+    return f"{action}({args_json}) error:\n{tool_data}"
+
+
+def _execute_step(user_text, action, args):
+    """Run one whitelisted action; return whether the turn continues, ends, or aborts."""
     spec = ACTION_SCHEMA[action]
     risk = spec["risk"]
     print(f"  -> proposed: {action}({json.dumps(args, ensure_ascii=False)})   [risk: {risk}]")
@@ -238,21 +313,21 @@ def _run_action(user_text, model, action, args, *, tool_followup=True):
             _say("I heard more than one email address. Which email belongs to whom?")
             log(action=action, args=args, decision="ambiguous", ok=False)
             _episode(user_text, "failure", action, args, "ambiguous multi-email remember request")
-            return
+            return StepOutcome("abort")
         if validated == "invalid":
             print("  [rejected] remember requires a non-empty key and value")
             log(action=action, args=args, decision="rejected-args", ok=False)
             _episode(user_text, "failure", action, args, "remember missing key or value")
-            return
+            return StepOutcome("abort")
         key, value = validated
         _save_remember(user_text, key, value)
-        return
+        return StepOutcome("continue", f"remember({json.dumps({'key': key, 'value': value}, ensure_ascii=False)}) → saved")
 
     if risk == "confirm" and not allow(action, args):
         print("  x denied")
         log(action=action, args=args, decision="denied", ok=False)
         _episode(user_text, "failure", action, args, f"denied {action}")
-        return
+        return StepOutcome("abort")
 
     if "to" in args:
         email = _resolve_recipient(args["to"])
@@ -261,12 +336,25 @@ def _run_action(user_text, model, action, args, *, tool_followup=True):
             _ask_for_email(label)
             log(action=action, args=args, decision="needs-email", ok=False)
             _episode(user_text, "partial", action, args, f"asked for {label}'s email")
-            return
+            return StepOutcome("abort")
         args = {**args, "to": email}
         print(f"  -> to: {email}")
 
     if action == "say":
-        print(f"  -> {args.get('text', '')}")
+        text = args.get("text", "")
+        print(f"  -> {text}")
+        try:
+            handler = getattr(actions_mod, spec["handler"].__name__)
+            handler(**args)
+        except Exception as e:
+            print(f"  ! error: {e}")
+            log(action=action, args=args, decision="allowed", ok=False, error=str(e))
+            _episode(user_text, "failure", action, args, str(e))
+            return StepOutcome("abort")
+        print("  ok")
+        log(action=action, args=args, decision="allowed", ok=True)
+        _episode(user_text, "success", action, args, _success_note(action, args))
+        return StepOutcome("done")
 
     try:
         handler = getattr(actions_mod, spec["handler"].__name__)
@@ -275,50 +363,73 @@ def _run_action(user_text, model, action, args, *, tool_followup=True):
         _say(e.message)
         log(action=action, args=args, decision="needs-input", ok=False)
         _episode(user_text, "partial", action, args, e.message)
-        return
+        return StepOutcome("abort")
     except Exception as e:
         print(f"  ! error: {e}")
         log(action=action, args=args, decision="allowed", ok=False, error=str(e))
         _episode(user_text, "failure", action, args, str(e))
-        return
+        return StepOutcome("abort")
 
-    tool_data = result.data if isinstance(result, ToolResult) else result
-    preset_say = result.say if isinstance(result, ToolResult) else None
+    if isinstance(result, ToolResult):
+        tool_data = result.data
+        tool_ok = getattr(result, "ok", True)
+        if tool_ok:
+            print("  -> data received")
+            log(action=action, args=args, decision="allowed", ok=True)
+            _episode(user_text, "success", action, args, _success_note(action, args, tool_data))
+        else:
+            print(f"  -> tool error: {tool_data}")
+            log(action=action, args=args, decision="allowed", ok=False, error=str(tool_data))
+            _episode(user_text, "failure", action, args, str(tool_data)[:120])
+        return StepOutcome(
+            "continue",
+            _tool_history_line(action, args, tool_data, tool_ok),
+        )
 
-    if preset_say and tool_followup:
-        print(f"  -> data received")
+    if isinstance(result, str):
+        print("  -> data received")
         log(action=action, args=args, decision="allowed", ok=True)
-        _episode(user_text, "success", action, args, _success_note(action, args, tool_data))
-        _run_action(user_text, model, "say", {"text": preset_say}, tool_followup=False)
-        return
-
-    if isinstance(tool_data, str) and tool_followup:
-        print(f"  -> data received")
-        log(action=action, args=args, decision="allowed", ok=True)
-        _episode(user_text, "success", action, args, _success_note(action, args, tool_data))
-        try:
-            raw = chat(model, _system_prompt(), _build_tool_followup_prompt(user_text, action, tool_data))
-            msg = parse_action(raw)
-            follow_action = msg["action"]
-            follow_args = _normalize_args(msg.get("args", {}))
-        except (json.JSONDecodeError, TypeError, KeyError, HTTPError, Exception) as e:
-            print(f"  [could not summarize tool data]: {e}")
-            _say("Sorry, I couldn't summarize that.")
-            _episode(user_text, "failure", "parse", {}, f"tool follow-up failed: {e}")
-            return
-        if follow_action != "say":
-            print(f"  [expected say after tool data, got {follow_action!r}]")
-            _say("Sorry, I couldn't summarize that.")
-            return
-        if not _valid_args(ACTION_SCHEMA["say"], follow_args):
-            print(f"  [rejected] wrong args for say: {list(follow_args)}")
-            return
-        _run_action(user_text, model, follow_action, follow_args, tool_followup=False)
-        return
+        _episode(user_text, "success", action, args, _success_note(action, args, result))
+        return StepOutcome("continue", _tool_history_line(action, args, result, True))
 
     print("  ok")
     log(action=action, args=args, decision="allowed", ok=True)
     _episode(user_text, "success", action, args, _success_note(action, args))
+    return StepOutcome("continue", f"{action}({json.dumps(args, ensure_ascii=False)}) → ok")
+
+
+def _compound_hints(user_text):
+    hints = []
+    weather = bool(re.search(r"\b(weather|temperature|forecast|temp)\b", user_text, re.I))
+    calendar = _sense_action(user_text) == "read_calendar" or bool(
+        re.search(r"\b(calendar|schedule|my day|meetings|agenda)\b", user_text, re.I)
+    )
+    if weather and calendar:
+        hints.append(
+            "This request needs both get_weather and read_calendar before your final say."
+        )
+    if re.search(r"\bopen\b", user_text, re.I) and re.search(r"\bplay\b", user_text, re.I):
+        hints.append("Open the app first with open_app, then play_music with the track, then say.")
+    return hints
+
+
+def _coerce_action_args(action, args, user_text):
+    spec = ACTION_SCHEMA.get(action)
+    if spec is None:
+        return None, None
+    args = _coerce_args(spec, args)
+    if _valid_args(spec, args):
+        return action, args
+    if action == "get_weather":
+        return action, _weather_args(user_text)
+    if action == "read_calendar":
+        return action, {"query": user_text}
+    return None, None
+
+
+def _request_action(backend, user_prompt):
+    """Ask the model for the next action JSON."""
+    return backend.chat(_system_prompt(), user_prompt)
 
 
 def _build_prompt(user_text):
@@ -329,8 +440,7 @@ def _build_prompt(user_text):
     past = palace_memory.recall_summary(user_text, n=3)
     if past:
         parts.append(past)
-    required = _sense_action(user_text)
-    if required == "read_calendar":
+    if _sense_action(user_text) == "read_calendar":
         schedule_facts = memory.recall_for_schedule()
         if schedule_facts:
             parts.append(f"Schedule notes:\n{schedule_facts}")
@@ -338,12 +448,13 @@ def _build_prompt(user_text):
     if facts:
         parts.append(f"Known facts:\n{facts}")
     parts.append(f"Request: {user_text}")
-    if required:
-        parts.append(f"Required action: {required} (fetch live data; do not guess with say).")
+    hints = _compound_hints(user_text)
+    if hints:
+        parts.extend(hints)
     return "\n\n".join(parts)
 
 
-def handle(user_text, model):
+def handle(user_text, backend):
     user_text = _clean_input(user_text)
     if not user_text:
         return
@@ -355,11 +466,6 @@ def handle(user_text, model):
         return
 
     if _try_direct_say(user_text):
-        return
-
-    required = _sense_action(user_text)
-    if required == "read_calendar":
-        _run_action(user_text, model, "read_calendar", {})
         return
 
     if _email_intent(user_text):
@@ -376,55 +482,58 @@ def handle(user_text, model):
             )
             return
 
-    prompt = _build_prompt(user_text)
-    required = required or _sense_action(user_text)
-    try:
-        raw = chat(model, _system_prompt(), prompt)
-    except HTTPError as e:
-        print(f"  [ollama {e.code}]: model {model!r} not available")
-        print(f"        run: ollama pull {model}")
-        return
-    except Exception as e:
-        print(f"  [ollama error]: {e}")
-        return
-    try:
-        msg = parse_action(raw)
-        action = msg["action"]
-        args = _normalize_args(msg.get("args", {}))
-        if required and action == "say":
-            raw = chat(
-                model,
-                _system_prompt(),
-                f"{prompt}\n\nYou used say but must use {required} to fetch live data. "
-                f'Reply with only JSON. For get_weather use {{"action":"get_weather","args":{{}}}} '
-                f'when location is not specified; for read_calendar use {{"action":"read_calendar","args":{{}}}}.',
-            )
+    base_prompt = _build_prompt(user_text)
+    steps = []
+
+    for step_num in range(1, MAX_AGENT_STEPS + 1):
+        user_prompt = _build_step_prompt(base_prompt, steps)
+        try:
+            raw = _request_action(backend, user_prompt)
+        except BackendError as e:
+            print(f"  [{backend.name} error]: {e.message}")
+            if e.hint:
+                print(f"        {e.hint}")
+            return
+        except Exception as e:
+            print(f"  [{backend.name} error]: {e}")
+            return
+
+        try:
             msg = parse_action(raw)
             action = msg["action"]
             args = _normalize_args(msg.get("args", {}))
-        if required and action == "say":
-            _run_action(user_text, model, required, {})
+        except (json.JSONDecodeError, TypeError, KeyError, AttributeError) as e:
+            print("  [could not parse model output]:", raw)
+            print(f"  ({e})")
+            _say("Sorry, I didn't understand that request.")
+            _episode(user_text, "failure", "parse", {}, f"unparseable model output: {raw!r}")
             return
-    except (json.JSONDecodeError, TypeError, KeyError, AttributeError) as e:
-        print("  [could not parse model output]:", raw)
-        print(f"  ({e})")
-        _say("Sorry, I didn't understand that request.")
-        _episode(user_text, "failure", "parse", {}, f"unparseable model output: {raw!r}")
-        return
 
-    spec = ACTION_SCHEMA.get(action)
-    if spec is None:
-        print(f"  [rejected] unknown action: {action!r}")
-        log(action=action, args=args, decision="rejected-unknown", ok=False)
-        _episode(user_text, "failure", action, args, f"rejected unknown action {action!r}")
-        return
-    if not _valid_args(spec, args):
-        print(f"  [rejected] wrong args for {action}: {list(args)}")
-        log(action=action, args=args, decision="rejected-args", ok=False)
-        _episode(user_text, "failure", action, args, f"rejected wrong args for {action}")
-        return
+        coerced = _coerce_action_args(action, args, user_text)
 
-    _run_action(user_text, model, action, args)
+        if coerced == (None, None):
+            if ACTION_SCHEMA.get(action) is None:
+                print(f"  [rejected] unknown action: {action!r}")
+                log(action=action, args=args, decision="rejected-unknown", ok=False)
+                _episode(user_text, "failure", action, args, f"rejected unknown action {action!r}")
+            else:
+                print(f"  [rejected] wrong args for {action}: {list(args)}")
+                log(action=action, args=args, decision="rejected-args", ok=False)
+                _episode(user_text, "failure", action, args, f"rejected wrong args for {action}")
+            return
+
+        action, args = coerced
+        outcome = _execute_step(user_text, action, args)
+        if outcome.status == "done":
+            return
+        if outcome.status == "abort":
+            return
+        if outcome.history_line:
+            steps.append(outcome.history_line)
+
+    _say("Sorry, I couldn't finish that in time. Try breaking it into smaller steps.")
+    log(action="say", args={"text": "step cap"}, decision="step-cap", ok=False)
+    _episode(user_text, "failure", "step-cap", {}, f"hit {MAX_AGENT_STEPS} step limit")
 
 
 def _success_note(action, args, tool_result=None):
@@ -440,6 +549,10 @@ def _success_note(action, args, tool_result=None):
         return f"sent email to {args.get('to', '?')}"
     if action == "open_url":
         return f"opened {args.get('url', '?')}"
+    if action == "open_app":
+        return f"opened {args.get('app_name', '?')}"
+    if action == "play_music":
+        return f"playing {args.get('query', '?')} in {args.get('app_name') or 'Spotify'}"
     if action == "remember":
         return f"remembered {args.get('key', '?')}"
     if action == "read_calendar":
@@ -449,23 +562,21 @@ def _success_note(action, args, tool_result=None):
     return action.replace("_", " ")
 
 
-def _banner(model):
+def _banner(backend):
     return (
-        "\n  mac-agent v0  ·  local · gated · logged\n"
-        f"  model: {model}   (set MACAGENT_MODEL to change)\n"
+        "\n  mac-agent v0  ·  gated · logged\n"
+        f"  backend: {backend.describe()}\n"
         "  try: say good morning   /   draft an email to me@x.com about lunch\n"
         "  type 'exit' to quit.\n"
     )
 
 
-def repl(input_fn=None):
+def repl(input_fn=None, backend_getter=None):
     read = input_fn or input
+    getter = backend_getter or create_backend
     clock.start()
-    model = _pick_model()
-    if not model:
-        return
     episodic.init_session()
-    print(_banner(model))
+    banner_printed = False
     while True:
         try:
             user = _clean_input(read("you > ").strip())
@@ -478,7 +589,21 @@ def repl(input_fn=None):
             print("\nbye")
             break
         try:
-            handle(user, model)
+            backend = getter()
+        except BackendError as e:
+            print(f"  [backend error]: {e.message}")
+            if e.hint:
+                print(f"        {e.hint}")
+            continue
+        if not banner_printed:
+            print(_banner(backend))
+            banner_printed = True
+        try:
+            handle(user, backend)
+        except BackendError as e:
+            print(f"  [{backend.name} error]: {e.message}")
+            if e.hint:
+                print(f"        {e.hint}")
         except Exception as e:
             print(f"  ! error: {e}")
             _episode(user, "failure", "error", {}, str(e))

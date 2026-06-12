@@ -13,6 +13,7 @@ app = [
 
 [project.scripts]
 macagent = "mac_agent.cli:main"
+daimon = "mac_agent.launcher:main"
 
 [build-system]
 requires = ["setuptools>=68"]

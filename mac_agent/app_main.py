@@ -21,23 +21,22 @@ def _configure_app_paths():
     os.environ.setdefault("MACAGENT_MEMORY", str(support / "memory.json"))
     os.environ.setdefault("MACAGENT_AUDIT", str(support / "audit.jsonl"))
     os.environ.setdefault("DAIMON_MEMORY_DIR", str(support / "memory"))
+    os.environ.setdefault("DAIMON_SETTINGS", str(support / "settings.json"))
 
 
 def _repl_with_input(input_fn):
     from mac_agent.agent import repl
-    from mac_agent.ollama_client import ping
+    from mac_agent.backend import create_backend
 
-    if not ping():
-        print("Could not reach Ollama at http://localhost:11434")
-        print("  1. install Ollama:  https://ollama.com")
-        print("  2. pull a model:    ollama pull llama3.2")
-        print("  3. make sure it's running, then try again.")
-        return
-    repl(input_fn=input_fn)
+    repl(input_fn=input_fn, backend_getter=create_backend)
 
 
 def main():
+    from mac_agent.env import load_dotenv
+
+    load_dotenv()
     _configure_app_paths()
+    load_dotenv()
     from mac_agent.console_ui import run_console
 
     run_console(_repl_with_input)

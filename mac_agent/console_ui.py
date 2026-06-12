@@ -1,8 +1,8 @@
 """
 console_ui.py — Cocoa console for Daimon.app.
 
-Log area on top, input bar pinned to bottom. Transcript is a plain Python
-string re-rendered with setString_ so layout bugs cannot hide text.
+Log area on top, input bar pinned to bottom. Transcript grows with content
+and auto-scrolls to the latest line.
 """
 
 import io
@@ -18,7 +18,10 @@ from AppKit import (
     NSButton,
     NSColor,
     NSFont,
+    NSFontAttributeName,
+    NSForegroundColorAttributeName,
     NSMakeRect,
+    NSPopUpButton,
     NSScrollView,
     NSTextField,
     NSTextView,
@@ -32,13 +35,14 @@ from AppKit import (
     NSWindowStyleMaskResizable,
     NSWindowStyleMaskTitled,
 )
-from Foundation import NSMakeSize, NSObject, NSTimer
+from Foundation import NSAttributedString, NSMakeSize, NSObject, NSTimer
 import objc
 from PyObjCTools import AppHelper
 
 INPUT_H = 50
 MARGIN = 10
 SEND_W = 80
+BACKEND_W = 130
 
 
 class ConsoleWriter(io.TextIOBase):
@@ -68,33 +72,48 @@ class ConsoleController(NSObject):
     def enqueueLog_(self, text):
         self._pending.put(text)
 
+    def _logAttributes(self):
+        return {
+            NSFontAttributeName: NSFont.monospacedSystemFontOfSize_weight_(14, 0),
+            NSForegroundColorAttributeName: NSColor.labelColor(),
+        }
+
     def appendLog_(self, text):
         if not text:
             return
         self._transcript += text
-        self.textView.setString_(self._transcript)
-        self.textView.setTextColor_(NSColor.labelColor())
+        storage = self.textView.textStorage()
+        storage.appendAttributedString_(
+            NSAttributedString.alloc().initWithString_attributes_(text, self._logAttributes())
+        )
+        self._syncTextViewSize()
         self._scrollToEnd()
 
+    def _syncTextViewSize(self):
+        w = self._logWidth()
+        container = self.textView.textContainer()
+        container.setWidthTracksTextView_(False)
+        container.setContainerSize_((w, 1.0e7))
+        layout = self.textView.layoutManager()
+        layout.ensureLayoutForTextContainer_(container)
+        used = layout.usedRectForTextContainer_(container)
+        content_h = max(used.size.height + 24, self.scrollView.frame().size.height)
+        self.textView.setMinSize_(NSMakeSize(w, content_h))
+        self.textView.setMaxSize_(NSMakeSize(w, content_h))
+        self.textView.setFrameSize_(NSMakeSize(w, content_h))
+
     def _scrollToEnd(self):
-        length = self.textView.string().length()
-        if length:
-            self.textView.scrollRangeToVisible_((length - 1, 1))
+        self.textView.scrollToEndOfDocument_(None)
+        clip = self.scrollView.contentView()
+        doc_h = self.textView.frame().size.height
+        view_h = clip.bounds().size.height
+        if doc_h > view_h:
+            clip.scrollToPoint_((0, doc_h - view_h))
+            self.scrollView.reflectScrolledClipView_(clip)
 
     def _logWidth(self):
-        """Use the scroll view frame — contentSize is 0 before first layout."""
         w = self.scrollView.frame().size.width - 16
         return max(int(w), 200)
-
-    def _fixTextViewLayout(self):
-        w = self._logWidth()
-        h = max(self.textView.frame().size.height, self.scrollView.frame().size.height)
-        self.textView.setFrame_(NSMakeRect(0, 0, w, h))
-        self.textView.setMinSize_(NSMakeSize(w, 0))
-        self.textView.setMaxSize_(NSMakeSize(w, 1_000_000))
-        container = self.textView.textContainer()
-        container.setWidthTracksTextView_(True)
-        container.setContainerSize_(NSMakeSize(w, 1_000_000))
 
     def drainLog_(self, timer):
         while True:
@@ -114,7 +133,6 @@ class ConsoleController(NSObject):
         text = self.inputField.stringValue().strip()
         if not text:
             return
-        # Show in log BEFORE clearing the field.
         self.appendLog_(f"you > {text}\n")
         self.inputField.setStringValue_("")
         if text in ("exit", "quit"):
@@ -134,16 +152,30 @@ class ConsoleController(NSObject):
     def windowDidResize_(self, notification):
         self.relayoutWindow()
 
+    def backendChanged_(self, sender):
+        from mac_agent import settings
+
+        name = "claude" if sender.indexOfSelectedItem() == 0 else "ollama"
+        settings.set_backend(name)
+        self.appendLog_(f"\n  backend → {name}\n")
+
+    def _syncBackendPopup(self):
+        from mac_agent import settings
+
+        name = settings.get_backend()
+        self.backendPopup.selectItemAtIndex_(0 if name == "claude" else 1)
+
     def relayoutWindow(self):
         bounds = self.window.contentView().bounds()
         w = bounds.size.width
         h = bounds.size.height
         self.scrollView.setFrame_(NSMakeRect(0, INPUT_H, w, max(100, h - INPUT_H)))
-        field_w = max(100, w - MARGIN * 2 - SEND_W - 8)
-        self.inputField.setFrame_(NSMakeRect(MARGIN, MARGIN, field_w, INPUT_H - MARGIN * 2))
+        field_x = MARGIN + BACKEND_W + 8
+        field_w = max(100, w - field_x - MARGIN - SEND_W - 8)
+        self.backendPopup.setFrame_(NSMakeRect(MARGIN, MARGIN, BACKEND_W, INPUT_H - MARGIN * 2))
+        self.inputField.setFrame_(NSMakeRect(field_x, MARGIN, field_w, INPUT_H - MARGIN * 2))
         self.sendButton.setFrame_(NSMakeRect(w - MARGIN - SEND_W, MARGIN, SEND_W, INPUT_H - MARGIN * 2))
-        self._fixTextViewLayout()
-        self.textView.setString_(self._transcript)
+        self._syncTextViewSize()
         self._scrollToEnd()
 
     def buildWindow(self):
@@ -164,8 +196,18 @@ class ConsoleController(NSObject):
         cw = content.bounds().size.width
         ch = content.bounds().size.height
 
-        # Input bar (bottom) — add first so scroll sits behind but input stays on top when re-added
-        self.inputField = NSTextField.alloc().initWithFrame_(NSMakeRect(MARGIN, MARGIN, cw - 120, 30))
+        self.backendPopup = NSPopUpButton.alloc().initWithFrame_(
+            NSMakeRect(MARGIN, MARGIN, BACKEND_W, 30)
+        )
+        self.backendPopup.addItemsWithTitles_(["Claude", "Ollama"])
+        self.backendPopup.setAutoresizingMask_(NSViewMaxYMargin)
+        self.backendPopup.setTarget_(self)
+        self.backendPopup.setAction_("backendChanged:")
+        self._syncBackendPopup()
+
+        self.inputField = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(MARGIN + BACKEND_W + 8, MARGIN, cw - BACKEND_W - 140, 30)
+        )
         self.inputField.setAutoresizingMask_(NSViewWidthSizable | NSViewMaxYMargin)
         self.inputField.setBezelStyle_(NSBezelStyleRounded)
         self.inputField.setPlaceholderString_("Type here — Return or Send")
@@ -188,7 +230,6 @@ class ConsoleController(NSObject):
         self.scrollView.setDrawsBackground_(True)
         self.scrollView.setBackgroundColor_(NSColor.textBackgroundColor())
 
-        # Frame width from scroll view, NOT clip contentSize (often 0 at init).
         self.textView = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, cw - 16, log_h))
         self.textView.setEditable_(False)
         self.textView.setSelectable_(True)
@@ -202,14 +243,23 @@ class ConsoleController(NSObject):
         self.scrollView.setDocumentView_(self.textView)
 
         content.addSubview_(self.scrollView)
+        content.addSubview_(self.backendPopup)
         content.addSubview_(self.inputField)
         content.addSubview_(self.sendButton)
 
         self.relayoutWindow()
+        from mac_agent import settings
+
+        backend_name = settings.get_backend()
+        connect_msg = (
+            "Connecting to Claude (Anthropic API)…\n\n"
+            if backend_name == "claude"
+            else "Connecting to Ollama (localhost:11434)…\n\n"
+        )
         self.appendLog_(
             "─── Daimon log ───\n"
-            "local · gated · logged\n"
-            "Connecting to Ollama (localhost:11434)…\n\n"
+            "gated · logged\n"
+            f"{connect_msg}"
         )
 
         NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(

@@ -26,8 +26,10 @@ xattr -cr "${APP}" 2>/dev/null || true
 
 echo "Ad-hoc codesigning ${APP} …"
 codesign --force --deep --sign - "${APP}"
+codesign --verify --deep --strict "${APP}"
 
 echo
+echo "Bundle id: com.rhychaw.daimon"
 echo "Built: ${APP}"
 echo
 echo "Launch:"

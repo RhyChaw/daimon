@@ -2,8 +2,8 @@
 gate.py — the confirmation gate for risky actions.
 
 Risky actions cannot proceed unless this returns True. Deterministic only — no AI.
-Uses Touch ID (LocalAuthentication) when available; falls back to terminal y/N for
-dev runs without pyobjc or outside a GUI session.
+In Daimon.app every confirm-risk action requires Touch ID (LocalAuthentication,
+with passcode fallback). Terminal dev runs fall back to y/N when pyobjc is absent.
 """
 
 import sys
@@ -119,14 +119,13 @@ def _touch_id_allow(action, args):
 
 
 def allow(action, args):
+    touch_id, run_on_main = _load_touch_id()
     if _in_frozen_app():
-        touch_id, _run_on_main = _load_touch_id()
         if not touch_id:
             print("\n  [!] Touch ID unavailable in this build.")
             return False
         return _touch_id_allow(action, args)
 
-    touch_id, _run_on_main = _load_touch_id()
     if touch_id:
         try:
             return _touch_id_allow(action, args)

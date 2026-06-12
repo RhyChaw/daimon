@@ -3,6 +3,7 @@ senses.py — data-gathering verbs (calendar, weather). Handlers return text for
 """
 
 import json
+import re
 import subprocess
 import time
 import urllib.parse
@@ -59,11 +60,12 @@ class NeedsUserInput(Exception):
 class ToolResult:
     """Handler return value: optional pre-built say text skips the LLM follow-up."""
 
-    __slots__ = ("data", "say")
+    __slots__ = ("data", "say", "ok")
 
-    def __init__(self, data, say=None):
+    def __init__(self, data, say=None, ok=True):
         self.data = data
         self.say = say
+        self.ok = ok
 
 
 def _fetch_json(url, timeout=30):
@@ -95,7 +97,19 @@ def _parse_calendar_raw(raw):
             continue
         events.append(_CalEvent(start, end, all_day, title, location))
     events.sort(key=lambda e: e.start)
-    return events
+    return _dedupe_events(events)
+
+
+def _dedupe_events(events):
+    seen = set()
+    out = []
+    for e in events:
+        key = (e.title, e.start, e.end)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
 
 
 def _fmt_time(dt):
@@ -148,15 +162,64 @@ def _event_detail(e):
     return f"{e.title}{loc} from {_fmt_time_12h(e.start)} to {_fmt_time_12h(e.end)}"
 
 
-def _calendar_speech(remaining, now):
+_QUERY_STOP = frozenset({
+    "do", "i", "have", "is", "there", "am", "the", "a", "an", "my", "on", "at",
+    "today", "tonight", "this", "evening", "morning", "afternoon", "calendar",
+})
+
+
+def _search_terms(query):
+    return [
+        w for w in re.findall(r"[a-z0-9]+", query.lower())
+        if len(w) > 2 and w not in _QUERY_STOP
+    ]
+
+
+def _event_matches_query(e, query):
+    terms = _search_terms(query)
+    if not terms:
+        return False
+    return memory.key_matches_text(" ".join(terms), e.title)
+
+
+def _answer_event_query(remaining, all_today, now, query):
     stamp = _fmt_time_12h(now)
+    matches = [e for e in remaining if _event_matches_query(e, query)]
+    if matches:
+        return f"Yes — at {stamp} you still have {_event_detail(matches[0])}."
+    matches = [e for e in all_today if _event_matches_query(e, query)]
+    if matches:
+        e = matches[0]
+        if not e.all_day and e.end <= now:
+            return f"You had {_event_detail(e)}, but it's already over."
+        return f"I see {_event_detail(e)} today, but it's not on your remaining schedule."
+    return f"No — at {stamp} I don't see that on your calendar today."
+
+
+def _finished_schedule_notes():
+    notes = []
+    for line in memory.recall_for_schedule().splitlines():
+        if line.endswith("= finished"):
+            notes.append(line.split(" = ", 1)[0])
+    return notes
+
+
+def _calendar_speech(remaining, now, query="", all_today=None):
+    if query and re.search(r"\b(do i have|is there|am i|got)\b", query, re.I):
+        return _answer_event_query(remaining, all_today or remaining, now, query)
+    stamp = _fmt_time_12h(now)
+    finished = _finished_schedule_notes()
+    done_clause = ""
+    if finished:
+        done_clause = f" {' and '.join(finished)} {'is' if len(finished) == 1 else 'are'} done."
     if not remaining:
-        return f"It's {stamp}. Nothing left on your calendar today."
+        base = f"It's {stamp}. Nothing left on your calendar today."
+        return base + done_clause if done_clause else base
     details = [_event_detail(e) for e in remaining]
     if len(details) == 1:
-        return f"It's {stamp}. You still have {details[0]}."
+        return f"It's {stamp}. You still have {details[0]}." + done_clause
     joined = "; ".join(details)
-    return f"It's {stamp}. Still on your calendar: {joined}."
+    return f"It's {stamp}. Still on your calendar: {joined}." + done_clause
 
 
 def _format_calendar(events, now=None):
@@ -180,10 +243,17 @@ def _format_calendar(events, now=None):
     return "\n".join(lines)
 
 
-def _fetch_calendar_raw():
-    now = time.time()
-    if _CALENDAR_CACHE["raw"] is not None and now - _CALENDAR_CACHE["at"] < _CALENDAR_TTL:
-        return _CALENDAR_CACHE["raw"]
+def _calendar_not_running(err_text):
+    text = str(err_text).lower()
+    return "application isn't running" in text or "(-600)" in text
+
+
+def _launch_calendar():
+    subprocess.run(["open", "-a", "Calendar"], check=False)
+    time.sleep(1.5)
+
+
+def _run_calendar_script():
     proc = subprocess.run(
         ["osascript", script_path("read_calendar.applescript")],
         capture_output=True,
@@ -191,36 +261,94 @@ def _fetch_calendar_raw():
         encoding="utf-8",
         errors="replace",
         check=True,
-        timeout=120,
+        timeout=180,
     )
     if proc.stderr.strip():
         err = proc.stderr.strip().splitlines()[-1]
         raise RuntimeError(err)
-    raw = proc.stdout.strip()
-    _CALENDAR_CACHE["raw"] = raw
-    _CALENDAR_CACHE["at"] = now
-    return raw
+    return proc.stdout.strip()
 
 
-def read_calendar():
+def _fetch_calendar_raw():
+    now = time.time()
+    if _CALENDAR_CACHE["raw"] is not None and now - _CALENDAR_CACHE["at"] < _CALENDAR_TTL:
+        return _CALENDAR_CACHE["raw"]
+    last_err = None
+    for attempt in range(2):
+        try:
+            raw = _run_calendar_script()
+        except subprocess.CalledProcessError as e:
+            err = (e.stderr or e.stdout or str(e)).strip().splitlines()
+            last_err = err[-1] if err else str(e)
+            if attempt == 0 and _calendar_not_running(last_err):
+                _launch_calendar()
+                continue
+            raise RuntimeError(last_err) from e
+        except RuntimeError as e:
+            last_err = str(e)
+            if attempt == 0 and _calendar_not_running(last_err):
+                _launch_calendar()
+                continue
+            raise
+        _CALENDAR_CACHE["raw"] = raw
+        _CALENDAR_CACHE["at"] = now
+        return raw
+    raise RuntimeError(last_err or "calendar read failed")
+
+
+def _calendar_permission_denied(message):
+    text = str(message).lower()
+    markers = (
+        "not authorized",
+        "not allowed",
+        "operation not permitted",
+        "(-1743)",
+        "-1743",
+        "assistive",
+        "automation",
+        "privacy",
+        "calendar access",
+    )
+    return any(m in text for m in markers)
+
+
+def _calendar_error(message):
+    if _calendar_not_running(message):
+        _launch_calendar()
+        say = "I opened Calendar. Ask me about your schedule again."
+    elif "timed out" in str(message).lower():
+        say = "Calendar is taking too long. Try again in a moment."
+    elif _calendar_permission_denied(message):
+        say = (
+            "Daimon doesn't have Calendar access yet. "
+            "Open System Settings, Privacy and Security, Calendars, and turn on Daimon."
+        )
+    else:
+        say = "I couldn't read your calendar. Check Calendar permission for Daimon in System Settings."
+    return ToolResult(message, say=say, ok=False)
+
+
+def read_calendar(query=None):
     try:
         raw = _fetch_calendar_raw()
     except subprocess.TimeoutExpired:
-        return "(calendar read timed out — try again or check Calendar.app permissions)"
+        return _calendar_error("(calendar read timed out — try again or check Calendar.app permissions)")
     except UnicodeDecodeError as e:
-        return f"(calendar error: could not decode Calendar output — {e})"
+        return _calendar_error(f"(calendar error: could not decode Calendar output — {e})")
     except subprocess.CalledProcessError as e:
         err = (e.stderr or e.stdout or str(e)).strip().splitlines()
-        return f"(calendar error: {err[-1] if err else e})"
+        return _calendar_error(f"(calendar error: {err[-1] if err else e})")
     except FileNotFoundError as e:
-        return f"(calendar error: {e})"
+        return _calendar_error(f"(calendar error: {e})")
     except RuntimeError as e:
-        return f"(calendar error: {e})"
+        return _calendar_error(f"(calendar error: {e})")
     now = clock_now()
     events = _parse_calendar_raw(raw) if raw else []
+    all_today = [e for e in _events_today(events, now) if _event_visible(e)]
     remaining = _remaining_events(events, now)
     data = _format_calendar(events, now)
-    return ToolResult(data, say=_calendar_speech(remaining, now))
+    q = (query or "").strip()
+    return ToolResult(data, say=_calendar_speech(remaining, now, q, all_today))
 
 
 def _temp_unit():
