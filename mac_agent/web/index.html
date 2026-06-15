@@ -2,298 +2,320 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#030308">
 <title>Daimon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&family=Inter:ital,wght@0,300;0,400;0,500&display=swap" rel="stylesheet">
 <style>
+/* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { height: 100%; -webkit-text-size-adjust: none; text-size-adjust: none; }
 
 :root {
-  --idle-core:   #5577ee, #1a2d99;
-  --idle-glow:   68, 119, 238;
-  --think-core:  #bb66ff, #5511cc;
-  --think-glow:  170, 68, 255;
-  --act-core:    #44ddff, #006688;
-  --act-glow:    50, 200, 240;
-  --speak-core:  #ffdd66, #bb7700;
-  --speak-glow:  255, 200, 50;
-  --gate-core:   #ffaa44, #cc4400;
-  --gate-glow:   255, 150, 50;
-  --listen-core: #44ff88, #007733;
-  --listen-glow: 60, 220, 120;
+  --bg: #030308;
+  --text: #d2d8f0;
+  --text-dim: rgba(180,185,220,0.34);
+  --orb: 180px;
+  --stage: 300px;
+  --mote-r: 78px;
+  --font-display: 'Syne', system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, sans-serif;
+}
+@media (max-width: 480px) {
+  :root { --orb: 140px; --stage: 240px; --mote-r: 62px; }
 }
 
 body {
-  background: #07070d;
-  color: #dde;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   overflow: hidden;
+  overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
-}
-
-/* ── Orb ──────────────────────────────────────────────────────────── */
-#stage {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  width: 100%;
-  padding: 0 20px;
-}
-
-#orb {
-  width: 130px;
-  height: 130px;
-  border-radius: 50%;
+  touch-action: manipulation;
   position: relative;
-  transition: background 0.5s ease, box-shadow 0.5s ease;
-  will-change: transform, box-shadow;
 }
 
-/* inner highlight blob */
-#orb::before {
-  content: "";
-  position: absolute;
-  top: 18%;
-  left: 22%;
-  width: 38%;
-  height: 28%;
-  background: rgba(255,255,255,0.28);
+/* depth radial field — makes the void feel like space */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse 72% 56% at 50% 36%,
+    rgba(18,24,72,0.32) 0%, transparent 68%);
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Connection dot ─────────────────────────────────────────────────────── */
+#conn {
+  position: fixed; top: 16px; right: 18px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(255,55,55,0.45);
+  transition: background 0.6s;
+  z-index: 20;
+}
+#conn.ok { background: rgba(55,210,100,0.5); }
+
+/* ── Wordmark ───────────────────────────────────────────────────────────── */
+#wordmark {
+  font-family: var(--font-display);
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.30em; text-transform: uppercase;
+  color: rgba(150,160,210,0.18);
+  padding-top: max(20px, env(safe-area-inset-top, 20px));
+  flex-shrink: 0; z-index: 1; user-select: none;
+}
+
+/* ── Stage (orb area) ───────────────────────────────────────────────────── */
+#stage {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px; position: relative; z-index: 1;
+}
+
+/* outer ring that holds the orb canvas + motes */
+#orb-outer {
+  width: var(--stage); height: var(--stage);
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+/* WebGL canvas — the actual orb */
+#orb-canvas {
+  width: var(--orb); height: var(--orb);
   border-radius: 50%;
-  filter: blur(8px);
-  pointer-events: none;
+  position: relative; z-index: 2;
+  will-change: transform, box-shadow;
+  transform-origin: center;
+  cursor: default;
 }
 
-/* state classes ── background + glow injected by JS via CSS vars */
-#orb.idle {
-  background: radial-gradient(circle at 36% 34%, #6688ff, #1a2d99);
-  box-shadow:
-    0 0 40px 10px rgba(68,119,238,0.45),
-    0 0 90px 25px rgba(68,119,238,0.15);
-  animation: pulse-slow 3.2s ease-in-out infinite;
+/* CSS fallback when WebGL unavailable */
+#orb-canvas.no-webgl {
+  background: radial-gradient(circle at 38% 34%, #5577ff, #1122aa);
+  box-shadow: 0 0 55px 18px rgba(68,100,255,0.40),
+              0 0 110px 44px rgba(68,100,255,0.14);
+  animation: css-breathe 3.2s ease-in-out infinite;
 }
-#orb.thinking {
-  background: radial-gradient(circle at 36% 34%, #cc77ff, #5511cc);
-  box-shadow:
-    0 0 50px 14px rgba(170,68,255,0.55),
-    0 0 100px 32px rgba(170,68,255,0.20);
-  animation: pulse-medium 1.3s ease-in-out infinite;
+@keyframes css-breathe { 0%,100%{transform:scale(1);}50%{transform:scale(1.04);} }
+
+/* ── Motes (orbiting particles — thinking state) ─────────────────────── */
+.mote {
+  position: absolute; width: 4px; height: 4px;
+  border-radius: 50%; background: rgba(175,95,255,0.75);
+  top: 50%; left: 50%; margin: -2px 0 0 -2px;
+  opacity: 0; pointer-events: none; z-index: 1;
+  box-shadow: 0 0 6px 2px rgba(175,95,255,0.55);
+  transition: opacity 0.9s ease;
 }
-#orb.acting {
-  background: radial-gradient(circle at 36% 34%, #55eeff, #006688);
-  box-shadow:
-    0 0 50px 14px rgba(50,200,240,0.55),
-    0 0 100px 32px rgba(50,200,240,0.20);
-  animation: pulse-fast 0.85s ease-in-out infinite;
+#orb-outer.moteing .mote { opacity: 1; }
+.mote:nth-child(1){ animation: orb1 4.8s linear infinite; }
+.mote:nth-child(2){ animation: orb2 6.0s linear infinite; animation-delay:-2.0s; }
+.mote:nth-child(3){ animation: orb3 3.9s linear infinite; animation-delay:-1.0s; }
+
+@keyframes orb1 {
+  0%   { transform: rotate(0deg)   translateX(var(--mote-r)) scale(1.0); }
+  50%  { transform: rotate(180deg) translateX(var(--mote-r)) scale(0.7); }
+  100% { transform: rotate(360deg) translateX(var(--mote-r)) scale(1.0); }
 }
-#orb.speaking {
-  background: radial-gradient(circle at 36% 34%, #ffe066, #bb7700);
-  box-shadow:
-    0 0 60px 18px rgba(255,200,50,0.60),
-    0 0 120px 40px rgba(255,200,50,0.22);
-  animation: breathe-gold 1.6s ease-in-out infinite;
+@keyframes orb2 {
+  0%   { transform: rotate(120deg)  translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
+  50%  { transform: rotate(300deg)  translateX(calc(var(--mote-r)*1.1)) scale(1.1); }
+  100% { transform: rotate(480deg)  translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
 }
-#orb.gate {
-  background: radial-gradient(circle at 36% 34%, #ffbb55, #cc4400);
-  box-shadow:
-    0 0 50px 14px rgba(255,150,50,0.60),
-    0 0 110px 36px rgba(255,150,50,0.22);
-  animation: pulse-gate 0.95s ease-in-out infinite;
-}
-#orb.listening {
-  background: radial-gradient(circle at 36% 34%, #55ff99, #007733);
-  box-shadow:
-    0 0 50px 14px rgba(60,220,120,0.55),
-    0 0 100px 32px rgba(60,220,120,0.20);
-  animation: pulse-slow 2.0s ease-in-out infinite;
+@keyframes orb3 {
+  0%   { transform: rotate(240deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
+  50%  { transform: rotate(420deg) translateX(calc(var(--mote-r)*.88)) scale(0.6); }
+  100% { transform: rotate(600deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
 }
 
-@keyframes pulse-slow   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.04);} }
-@keyframes pulse-medium { 0%,100%{transform:scale(1);}    50%{transform:scale(1.07);} }
-@keyframes pulse-fast   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.09);} }
-@keyframes pulse-gate   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.07);} }
-@keyframes breathe-gold {
-  0%,100%{ transform:scale(1);    box-shadow:0 0 60px 18px rgba(255,200,50,0.60),0 0 120px 40px rgba(255,200,50,0.22); }
-  50%    { transform:scale(1.06); box-shadow:0 0 80px 26px rgba(255,200,50,0.75),0 0 150px 55px rgba(255,200,50,0.30); }
+/* ── State label ────────────────────────────────────────────────────────── */
+#state-label {
+  font-family: var(--font-display);
+  font-size: 10px; font-weight: 400;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  color: rgba(160,170,220,0.0);
+  transition: color 0.55s ease;
+  min-height: 14px; user-select: none;
 }
+#state-label.visible { color: rgba(155,165,215,0.38); }
 
-/* ── Action chips ─────────────────────────────────────────────────── */
+/* ── Action chips ───────────────────────────────────────────────────────── */
 #chips {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
-  min-height: 28px;
+  display: flex; flex-wrap: wrap;
+  justify-content: center; gap: 6px;
+  min-height: 26px; max-width: 320px;
 }
-
 .chip {
-  padding: 4px 13px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  opacity: 0;
-  transform: translateY(5px) scale(0.95);
-  animation: chip-in 0.28s ease forwards;
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 12px 4px 9px; border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 10.5px; font-weight: 500; letter-spacing: 0.03em;
+  opacity: 0; transform: translateY(7px) scale(0.92);
+  animation: chip-in 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
   white-space: nowrap;
 }
 @keyframes chip-in { to { opacity:1; transform:translateY(0) scale(1); } }
-
+.chip::before {
+  content:''; width:5px; height:5px; border-radius:50%; flex-shrink:0;
+}
 .chip-auto {
-  background: rgba(68,119,238,0.13);
-  border: 1px solid rgba(68,119,238,0.38);
-  color: #99aaff;
+  background: rgba(68,110,240,0.09); border: 1px solid rgba(68,110,240,0.26);
+  color: rgba(140,158,255,0.88);
 }
+.chip-auto::before { background:#5577ee; box-shadow:0 0 5px rgba(68,110,240,0.9); }
 .chip-confirm {
-  background: rgba(255,150,50,0.13);
-  border: 1px solid rgba(255,150,50,0.45);
-  color: #ffbb77;
+  background: rgba(240,138,38,0.09); border: 1px solid rgba(240,138,38,0.30);
+  color: rgba(255,182,100,0.92);
 }
+.chip-confirm::before { background:#f08820; box-shadow:0 0 5px rgba(240,138,38,0.9); }
 
-/* ── Gate overlay ─────────────────────────────────────────────────── */
+/* ── Gate overlay ───────────────────────────────────────────────────────── */
 #gate-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.72);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 18px;
-  z-index: 50;
-  animation: fade-in 0.22s ease;
+  position: fixed; inset: 0;
+  background: rgba(2,2,6,0.76);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 100;
 }
-#gate-overlay.visible { display: flex; }
-@keyframes fade-in { from{opacity:0;} to{opacity:1;} }
+#gate-overlay.visible { display: flex; animation: gate-bg-in 0.28s ease; }
+@keyframes gate-bg-in { from{opacity:0;} to{opacity:1;} }
 
-.gate-icon {
-  font-size: 58px;
-  line-height: 1;
-  filter: drop-shadow(0 0 18px rgba(255,150,50,0.6));
-  animation: gate-bob 1.1s ease-in-out infinite;
+#gate-card {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 36px 40px 30px;
+  border-radius: 26px;
+  background: rgba(14,14,22,0.88);
+  border: 1px solid rgba(240,138,38,0.24);
+  box-shadow: 0 0 55px rgba(240,138,38,0.10),
+              0 28px 72px rgba(0,0,0,0.55),
+              inset 0 1px 0 rgba(255,255,255,0.04);
+  max-width: 288px; width: calc(100% - 48px);
+  animation: gate-card-in 0.36s cubic-bezier(0.34,1.56,0.64,1);
 }
-@keyframes gate-bob { 0%,100%{transform:scale(1);} 50%{transform:scale(1.1);} }
-
-#gate-label {
-  font-size: 15px;
-  color: rgba(255,255,255,0.72);
-  text-align: center;
-  max-width: 280px;
-  line-height: 1.55;
+@keyframes gate-card-in {
+  from { opacity:0; transform: scale(0.86) translateY(14px); }
+  to   { opacity:1; transform: scale(1)    translateY(0); }
+}
+.gate-ring {
+  width: 54px; height: 54px; border-radius: 50%;
+  border: 1.5px solid rgba(240,138,38,0.42);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: rgba(255,178,78,0.92);
+  box-shadow: 0 0 22px rgba(240,138,38,0.18),
+              inset 0 0 14px rgba(240,138,38,0.08);
+  animation: gate-ring-pulse 1.9s ease-in-out infinite;
+}
+@keyframes gate-ring-pulse {
+  0%,100% { box-shadow: 0 0 22px rgba(240,138,38,0.18), inset 0 0 14px rgba(240,138,38,0.08); }
+  50%      { box-shadow: 0 0 38px rgba(240,138,38,0.38), inset 0 0 20px rgba(240,138,38,0.16); }
+}
+#gate-action {
+  font-family: var(--font-display);
+  font-size: 14.5px; font-weight: 600;
+  color: rgba(240,242,255,0.90);
+  text-align: center; line-height: 1.4; letter-spacing: 0.01em;
 }
 .gate-hint {
-  font-size: 12px;
-  color: rgba(255,255,255,0.28);
+  font-size: 12px; font-weight: 300;
+  color: rgba(180,185,220,0.42);
+  text-align: center; line-height: 1.5;
 }
 
-/* ── Transcript ───────────────────────────────────────────────────── */
+/* ── Transcript ─────────────────────────────────────────────────────────── */
 #transcript {
-  width: 100%;
-  max-width: 540px;
-  padding: 0 22px;
-  max-height: 28vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  scrollbar-width: none;
-  flex-shrink: 0;
+  width: 100%; max-width: 510px;
+  padding: 0 26px;
+  max-height: 26vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  scrollbar-width: none; flex-shrink: 0; z-index: 1;
 }
 #transcript::-webkit-scrollbar { display: none; }
-
 .msg {
-  font-size: 14px;
-  line-height: 1.55;
-  opacity: 0;
-  transform: translateY(4px);
-  animation: msg-in 0.25s ease forwards;
+  font-size: 13.5px; line-height: 1.62;
+  opacity: 0; transform: translateY(5px);
+  animation: msg-in 0.3s ease forwards;
 }
 @keyframes msg-in { to { opacity:1; transform:translateY(0); } }
-
-.msg-user   { color: rgba(200,200,255,0.42); text-align: right; }
-.msg-daimon { color: #dde8ff; }
-
-/* ── Input bar ────────────────────────────────────────────────────── */
-#input-bar {
-  width: 100%;
-  max-width: 540px;
-  padding: 12px 20px 28px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex-shrink: 0;
+.msg-user {
+  color: var(--text-dim); text-align: right;
+  font-size: 13px; font-weight: 300;
 }
+.msg-daimon { color: rgba(215,225,255,0.88); font-weight: 300; }
 
+/* ── Input bar ──────────────────────────────────────────────────────────── */
+#input-bar {
+  width: 100%; max-width: 510px;
+  padding: 10px 18px max(20px, env(safe-area-inset-bottom, 20px));
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; z-index: 1;
+}
 #input {
   flex: 1;
-  background: rgba(255,255,255,0.055);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
-  color: #dde;
-  font-family: inherit;
-  font-size: 15px;
-  padding: 11px 16px;
-  outline: none;
-  transition: border-color 0.2s;
-  caret-color: #88aaff;
+  background: rgba(255,255,255,0.046);
+  border: 1px solid rgba(255,255,255,0.076);
+  border-radius: 22px;
+  color: var(--text);
+  font-family: var(--font-body); font-size: 15px; font-weight: 400;
+  padding: 11px 18px; outline: none;
+  transition: border-color 0.24s, background 0.24s;
+  caret-color: #7799ff;
+  -webkit-appearance: none; appearance: none;
 }
-#input:focus  { border-color: rgba(100,140,255,0.45); }
-#input::placeholder { color: rgba(255,255,255,0.18); }
-
-#send-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 1px solid rgba(68,119,238,0.38);
-  background: rgba(68,119,238,0.14);
-  color: #99aaff;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.18s, transform 0.1s;
-  flex-shrink: 0;
-  line-height: 1;
+#input:focus {
+  border-color: rgba(95,135,255,0.32);
+  background: rgba(255,255,255,0.066);
 }
-#send-btn:hover  { background: rgba(68,119,238,0.30); }
-#send-btn:active { transform: scale(0.90); }
-
-/* ── Connection dot ───────────────────────────────────────────────── */
-#conn {
-  position: fixed;
-  top: 14px;
-  right: 16px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ff4455;
-  transition: background 0.35s;
+#input::placeholder { color: rgba(255,255,255,0.13); }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgba(95,125,255,0.20);
+  background: rgba(55,75,200,0.09);
+  color: rgba(135,155,255,0.62);
+  font-size: 17px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.2s, border-color 0.2s, transform 0.12s;
+  flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+  line-height: 1; user-select: none;
 }
-#conn.ok { background: #44ff88; }
+.icon-btn:hover { background: rgba(55,75,200,0.18); border-color: rgba(95,125,255,0.38); }
+.icon-btn:active { transform: scale(0.87); }
+#mic-btn { font-size: 14px; opacity: 0.55; } /* mic: coming soon */
 </style>
 </head>
 <body>
 
 <div id="conn"></div>
+<p id="wordmark">Daimon</p>
 
-<!-- Gate overlay -->
+<!-- Gate -->
 <div id="gate-overlay">
-  <div class="gate-icon">⊕</div>
-  <div id="gate-label">Touch ID required</div>
-  <div class="gate-hint">Use Touch ID or your password to continue</div>
+  <div id="gate-card">
+    <div class="gate-ring">⊛</div>
+    <div id="gate-action">Confirm action</div>
+    <div class="gate-hint">Touch ID or password to continue</div>
+  </div>
 </div>
 
-<!-- Orb + chips -->
+<!-- Orb -->
 <div id="stage">
-  <div id="orb" class="idle"></div>
+  <div id="orb-outer">
+    <canvas id="orb-canvas"></canvas>
+    <div class="mote"></div>
+    <div class="mote"></div>
+    <div class="mote"></div>
+  </div>
+  <div id="state-label"></div>
   <div id="chips"></div>
 </div>
 
@@ -302,90 +324,348 @@ body {
 
 <!-- Input -->
 <div id="input-bar">
-  <input id="input" type="text" placeholder="Ask Daimon something…" autocomplete="off" spellcheck="false" />
-  <button id="send-btn" aria-label="Send">↑</button>
+  <input id="input" type="text" placeholder="Ask Daimon something…"
+         autocomplete="off" autocorrect="off" spellcheck="false"
+         enterkeyhint="send" inputmode="text">
+  <button class="icon-btn" id="mic-btn" aria-label="Voice">🎙</button>
+  <button class="icon-btn" id="send-btn" aria-label="Send">↑</button>
 </div>
 
 <script>
 "use strict";
-
+// ─── WS URL (preserve existing contract) ─────────────────────────────────────
 const WS_URL = `ws://${location.hostname}:8765`;
 
-const orbEl       = document.getElementById("orb");
-const chipsEl     = document.getElementById("chips");
-const transcriptEl= document.getElementById("transcript");
-const inputEl     = document.getElementById("input");
-const sendBtnEl   = document.getElementById("send-btn");
-const gateOverlay = document.getElementById("gate-overlay");
-const gateLabelEl = document.getElementById("gate-label");
-const connDot     = document.getElementById("conn");
+// ─── DOM refs ────────────────────────────────────────────────────────────────
+const canvas     = document.getElementById("orb-canvas");
+const chipsEl    = document.getElementById("chips");
+const txEl       = document.getElementById("transcript");
+const inputEl    = document.getElementById("input");
+const sendBtn    = document.getElementById("send-btn");
+const gateEl     = document.getElementById("gate-overlay");
+const gateAction = document.getElementById("gate-action");
+const connDot    = document.getElementById("conn");
+const stateLabel = document.getElementById("state-label");
+const orbOuter   = document.getElementById("orb-outer");
 
-// ── daimon UI API ─────────────────────────────────────────────────────────────
+// ─── WebGL shader sources ─────────────────────────────────────────────────────
+const VERT = `
+attribute vec2 a_pos;
+void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }
+`;
 
+const FRAG = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+#else
+  precision mediump float;
+#endif
+
+uniform float u_t;
+uniform vec2  u_res;
+uniform vec3  u_c1;
+uniform vec3  u_c2;
+uniform vec3  u_cr;
+uniform float u_turb;
+uniform float u_spd;
+uniform float u_pulse;
+uniform float u_rim;
+
+// ---- Simplex 2D noise (Stefan Gustavson) ------------------------------------
+vec3 _m289(vec3 x){ return x - floor(x*(1.0/289.0))*289.0; }
+vec2 _m289v(vec2 x){ return x - floor(x*(1.0/289.0))*289.0; }
+vec3 _perm(vec3 x){ return _m289(((x*34.0)+1.0)*x); }
+
+float sn(vec2 v){
+  const vec4 C = vec4(0.211324865405187,0.366025403784439,
+                     -0.577350269189626,0.024390243902439);
+  vec2 i  = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1  = (x0.x > x0.y) ? vec2(1.0,0.0) : vec2(0.0,1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy  -= i1;
+  i = _m289v(i);
+  vec3 p = _perm(_perm(i.y + vec3(0.0,i1.y,1.0)) + i.x + vec3(0.0,i1.x,1.0));
+  vec3 m  = max(0.5 - vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)), 0.0);
+  m = m*m; m = m*m;
+  vec3 xv = 2.0*fract(p*C.www) - 1.0;
+  vec3 h  = abs(xv) - 0.5;
+  vec3 ox = floor(xv + 0.5);
+  vec3 a0 = xv - ox;
+  m *= 1.79284291400159 - 0.85373472095314*(a0*a0 + h*h);
+  vec3 g;
+  g.x  = a0.x*x0.x  + h.x*x0.y;
+  g.yz = a0.yz*x12.xz + h.yz*x12.yw;
+  return 130.0 * dot(m, g);
+}
+
+float fbm(vec2 p, float spd){
+  float v = 0.0, a = 0.5;
+  for(int i=0; i<4; i++){
+    v += a * sn(p + vec2(u_t*spd*(0.28+float(i)*0.08),
+                         u_t*spd*(0.19+float(i)*0.06)));
+    p  = p*2.1 + vec2(3.17+float(i), 1.73+float(i)*0.9);
+    a *= 0.5;
+  }
+  return v;
+}
+// -----------------------------------------------------------------------------
+
+void main(){
+  // UV in [-1,1], square canvas
+  vec2 uv = (gl_FragCoord.xy / u_res) * 2.0 - 1.0;
+  float r  = length(uv);
+
+  float mask = smoothstep(1.0, 0.84, r);
+  if(mask < 0.002){ gl_FragColor = vec4(0.0); return; }
+
+  // Fake sphere normal → Fresnel
+  float nz      = sqrt(max(0.0, 1.0 - r*r));
+  float fresnel  = pow(1.0 - nz, 2.8);
+
+  // Domain-warped FBM — slower when turb is low (idle = barely drifting)
+  float spd = u_spd;
+  vec2  q   = vec2(sn(uv*1.9 + vec2(u_t*spd*0.38, 0.0)),
+                   sn(uv*1.9 + vec2(0.0, u_t*spd*0.32) + vec2(5.2,1.3)));
+  float plasma = fbm(uv*2.2 + q*(u_turb*1.3), spd)*0.5 + 0.5;
+
+  // Core luminous spot (off-center upper-left like a light source)
+  vec2  cOff = vec2(-0.11, 0.17);
+  float cDist = length(uv - cOff);
+  float core  = exp(-cDist * 3.1) * (0.58 + 0.42*u_pulse);
+
+  // Radial color blend + plasma perturbation
+  float radT = clamp(r*0.72 + plasma*u_turb*0.38, 0.0, 1.0);
+  vec3  col  = mix(u_c1, u_c2, radT);
+
+  // Fresnel rim
+  col = mix(col, u_cr, fresnel * u_rim);
+
+  // Core bloom
+  col += u_c1 * core * 0.62;
+
+  // Subtle inner highlight (specular-ish)
+  float spec = exp(-length(uv - vec2(-0.19,0.22))*5.5);
+  col += vec3(0.28, 0.32, 0.45) * spec * (1.0 - u_turb*0.6);
+
+  // Soft Reinhard tonemap
+  col = col / (col + 0.42) * 1.42;
+
+  gl_FragColor = vec4(clamp(col,0.0,1.0)*mask, mask);
+}
+`;
+
+// ─── WebGL init ───────────────────────────────────────────────────────────────
+let gl = null, prog = null, aPos = -1, ub = {};
+let glReady = false;
+
+function initGL() {
+  const opts = { alpha:true, premultipliedAlpha:false, antialias:false, powerPreference:"default" };
+  gl = canvas.getContext("webgl", opts) || canvas.getContext("experimental-webgl", opts);
+  if (!gl) return false;
+
+  function mkShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.warn("Shader:", gl.getShaderInfoLog(s)); return null;
+    }
+    return s;
+  }
+  const vs = mkShader(gl.VERTEX_SHADER, VERT);
+  const fs = mkShader(gl.FRAGMENT_SHADER, FRAG);
+  if (!vs || !fs) return false;
+
+  prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.warn("Link:", gl.getProgramInfoLog(prog)); return false;
+  }
+
+  const quad = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
+  const buf  = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+
+  gl.useProgram(prog);
+  aPos = gl.getAttribLocation(prog, "a_pos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  ["u_t","u_res","u_c1","u_c2","u_cr","u_turb","u_spd","u_pulse","u_rim"]
+    .forEach(n => { ub[n] = gl.getUniformLocation(prog, n); });
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  return true;
+}
+
+function resizeCanvas() {
+  const dpr  = Math.min(devicePixelRatio || 1, 2);
+  const css  = parseFloat(getComputedStyle(canvas).width) || 180;
+  const px   = Math.round(css * dpr);
+  if (canvas.width !== px) {
+    canvas.width = px; canvas.height = px;
+    if (gl) gl.viewport(0, 0, px, px);
+  }
+}
+
+// ─── State definitions ────────────────────────────────────────────────────────
+// c1=core, c2=outer, cr=rim, turb=turbulence, spd=noise speed,
+// rim=fresnel rim intensity, pulseAmp=breathe %, pulsePer=period ms,
+// scale=base scale, motes=bool,
+// bRGB=bloom color [r,g,b], bA=near opacity, bR=near radius,
+// bfA=far opacity, bfR=far radius
+const ST = {
+  idle:     { c1:[.27,.50,1.],   c2:[.06,.13,.60],  cr:[.56,.78,1.],
+              turb:.09,  spd:.13, rim:.55, pulseAmp:.026, pulsePer:3400, scale:1.00, motes:false,
+              bRGB:[68,110,255],  bA:.34, bR:52, bfA:.11, bfR:98 },
+  listening:{ c1:[.18,.94,.55],  c2:[.04,.37,.22],  cr:[.44,.98,.64],
+              turb:.27,  spd:.37, rim:.47, pulseAmp:.036, pulsePer:1600, scale:1.024,motes:false,
+              bRGB:[50,210,120],  bA:.42, bR:58, bfA:.13, bfR:108 },
+  thinking: { c1:[.60,.18,1.],   c2:[.17,.05,.57],  cr:[.88,.47,1.],
+              turb:.68,  spd:.70, rim:.64, pulseAmp:.046, pulsePer:950,  scale:1.00, motes:true,
+              bRGB:[145,55,255],  bA:.42, bR:63, bfA:.14, bfR:118 },
+  acting:   { c1:[.08,.87,1.],   c2:[.01,.27,.57],  cr:[.27,.94,1.],
+              turb:.44,  spd:.51, rim:.51, pulseAmp:.036, pulsePer:760,  scale:1.014,motes:false,
+              bRGB:[28,195,240],  bA:.47, bR:60, bfA:.15, bfR:112 },
+  speaking: { c1:[1.,.80,.22],   c2:[.64,.31,.02],  cr:[1.,.91,.54],
+              turb:.21,  spd:.31, rim:.47, pulseAmp:.050, pulsePer:1200, scale:1.01, motes:false,
+              bRGB:[255,188,38],  bA:.47, bR:66, bfA:.15, bfR:122 },
+  gate:     { c1:[1.,.51,.10],   c2:[.57,.15,.02],  cr:[1.,.71,.21],
+              turb:.05,  spd:.07, rim:.80, pulseAmp:.016, pulsePer:2200, scale:.940, motes:false,
+              bRGB:[240,118,28],  bA:.58, bR:36, bfA:.20, bfR:68 },
+};
+
+// ─── Lerped current values (start at idle) ────────────────────────────────────
+function cloneState(s) {
+  return {
+    c1:[...s.c1], c2:[...s.c2], cr:[...s.cr],
+    turb:s.turb, spd:s.spd, rim:s.rim, scale:s.scale,
+    bRGB:[...s.bRGB], bA:s.bA, bR:s.bR, bfA:s.bfA, bfR:s.bfR,
+  };
+}
+const cur = cloneState(ST.idle);
+let tgtName = "idle", prevName = "idle";
+
+// ─── Spring nudge system (micro-reactivity) ───────────────────────────────────
+let nudgePos = 0, nudgeVel = 0;
+let focusBoost = 0;
+const T0 = performance.now();
+
+function springNudge(strength) { nudgeVel += strength; }
+function settleNudge()         { nudgeVel -= 0.028; }   // dip then spring up
+
+// ─── Mote + label management ──────────────────────────────────────────────────
+function applyStateExtras(name) {
+  const s = ST[name];
+  orbOuter.classList.toggle("moteing", s.motes);
+  if (name === "idle") { stateLabel.classList.remove("visible"); }
+  else { stateLabel.textContent = name; stateLabel.classList.add("visible"); }
+  if (name === "idle" && prevName !== "idle") settleNudge();
+}
+
+// ─── Draw loop ────────────────────────────────────────────────────────────────
+const LR = 0.065;  // lerp rate per frame (60 fps target)
+function lv(a, b, t){ for(let i=0;i<a.length;i++) a[i]+=(b[i]-a[i])*t; }
+function ln(a, b, t){ return a + (b-a)*t; }
+
+function draw(now) {
+  requestAnimationFrame(draw);
+  const t   = (now - T0) / 1000;
+  const tgt = ST[tgtName];
+
+  // Lerp all numeric state values
+  lv(cur.c1, tgt.c1, LR); lv(cur.c2, tgt.c2, LR); lv(cur.cr, tgt.cr, LR);
+  cur.turb  = ln(cur.turb, tgt.turb, LR*0.78);
+  cur.spd   = ln(cur.spd,  tgt.spd,  LR*0.70);
+  cur.rim   = ln(cur.rim,  tgt.rim,  LR);
+  cur.scale = ln(cur.scale,tgt.scale, LR);
+  lv(cur.bRGB, tgt.bRGB, LR*0.8);
+  cur.bA  = ln(cur.bA,  tgt.bA,  LR);
+  cur.bR  = ln(cur.bR,  tgt.bR,  LR);
+  cur.bfA = ln(cur.bfA, tgt.bfA, LR);
+  cur.bfR = ln(cur.bfR, tgt.bfR, LR);
+
+  // Breathing pulse + spring nudge
+  const breathe  = Math.sin(t * 2*Math.PI / (tgt.pulsePer/1000)) * tgt.pulseAmp;
+  const SPRING = 26, DAMP = 5.8, DT = 0.016;
+  nudgeVel += (-nudgePos*SPRING - nudgeVel*DAMP) * DT;
+  nudgePos += nudgeVel * DT;
+  focusBoost = ln(focusBoost, 0, 0.07);
+
+  const totalScale = cur.scale + breathe + nudgePos + focusBoost*0.014;
+  canvas.style.transform = `scale(${totalScale.toFixed(4)})`;
+
+  // Bloom via box-shadow (lerped color + sizes)
+  const [r,g,b] = cur.bRGB.map(v=>Math.round(v));
+  canvas.style.boxShadow = [
+    `0 0 ${cur.bR.toFixed(1)}px ${(cur.bR*.28).toFixed(1)}px rgba(${r},${g},${b},${cur.bA.toFixed(3)})`,
+    `0 0 ${cur.bfR.toFixed(1)}px ${(cur.bfR*.32).toFixed(1)}px rgba(${r},${g},${b},${cur.bfA.toFixed(3)})`,
+  ].join(",");
+
+  // WebGL render
+  if (!glReady) return;
+  const pulse = Math.sin(t * 2*Math.PI / (tgt.pulsePer/1000)) * 0.5 + 0.5;
+  gl.clearColor(0,0,0,0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform1f(ub.u_t,    t);
+  gl.uniform2f(ub.u_res,  canvas.width, canvas.height);
+  gl.uniform3fv(ub.u_c1,  cur.c1);
+  gl.uniform3fv(ub.u_c2,  cur.c2);
+  gl.uniform3fv(ub.u_cr,  cur.cr);
+  gl.uniform1f(ub.u_turb, cur.turb);
+  gl.uniform1f(ub.u_spd,  cur.spd);
+  gl.uniform1f(ub.u_pulse,pulse);
+  gl.uniform1f(ub.u_rim,  cur.rim);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+// ─── daimon UI API — exact contract preserved ─────────────────────────────────
 const daimon = {
   setState(state) {
-    orbEl.className = state;
-    if (state === "idle") {
-      // fade chips out a beat after going idle
-      setTimeout(() => { chipsEl.innerHTML = ""; }, 900);
-    }
+    if (!ST[state]) return;
+    prevName = tgtName;
+    tgtName  = state;
+    applyStateExtras(state);
+    if (state === "idle") setTimeout(() => { chipsEl.innerHTML = ""; }, 800);
   },
-
-  say(text) {
-    _appendMsg(text, "msg-daimon");
-  },
-
+  say(text)            { _appendMsg(text, "msg-daimon"); },
   proposeAction(verb, risk) {
-    const chip = document.createElement("div");
-    chip.className = `chip chip-${risk}`;
-    chip.textContent = verb.replace(/_/g, "​ ");   // zero-width space for wrap
-    chipsEl.appendChild(chip);
+    const c = document.createElement("div");
+    c.className = `chip chip-${risk}`;
+    c.textContent = verb.replace(/_/g, "​ ");
+    chipsEl.appendChild(c);
   },
-
   requestGate(label) {
-    gateLabelEl.textContent = label || "Touch ID required";
-    gateOverlay.classList.add("visible");
+    gateAction.textContent = label || "Confirm action";
+    gateEl.classList.add("visible");
   },
-
-  closeGate() {
-    gateOverlay.classList.remove("visible");
-  },
+  closeGate() { gateEl.classList.remove("visible"); },
 };
 
 function _appendMsg(text, cls) {
   const el = document.createElement("div");
   el.className = `msg ${cls}`;
   el.textContent = text;
-  transcriptEl.appendChild(el);
-  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  txEl.appendChild(el);
+  requestAnimationFrame(() => { txEl.scrollTop = txEl.scrollHeight; });
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-
-let ws = null;
-let reconnTimer = null;
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+let ws = null, reconnTimer = null;
 
 function connect() {
   ws = new WebSocket(WS_URL);
-
-  ws.addEventListener("open", () => {
-    connDot.classList.add("ok");
-    clearTimeout(reconnTimer);
-  });
-
+  ws.addEventListener("open",  () => { connDot.classList.add("ok"); clearTimeout(reconnTimer); });
   ws.addEventListener("close", () => {
     connDot.classList.remove("ok");
-    daimon.setState("idle");
-    daimon.closeGate();
+    daimon.setState("idle"); daimon.closeGate();
     reconnTimer = setTimeout(connect, 2000);
   });
-
   ws.addEventListener("error", () => ws.close());
-
   ws.addEventListener("message", ({ data }) => {
-    let msg;
-    try { msg = JSON.parse(data); } catch { return; }
-
+    let msg; try { msg = JSON.parse(data); } catch { return; }
     switch (msg.type) {
       case "state":      daimon.setState(msg.state);               break;
       case "say":        daimon.say(msg.text);                     break;
@@ -396,26 +676,37 @@ function connect() {
   });
 }
 
-connect();
-
-// ── Input ─────────────────────────────────────────────────────────────────────
-
+// ─── Input handling + micro-reactivity ───────────────────────────────────────
 function sendMessage() {
   const text = inputEl.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
   inputEl.value = "";
-
+  springNudge(0.055);                        // send pulse
   _appendMsg(text, "msg-user");
-  ws.send(JSON.stringify({ type: "user", text }));
+  ws.send(JSON.stringify({ type:"user", text }));
   daimon.setState("thinking");
 }
 
-sendBtnEl.addEventListener("click", sendMessage);
-inputEl.addEventListener("keydown", (e) => {
+sendBtn.addEventListener("click", sendMessage);
+inputEl.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
+inputEl.addEventListener("focus",   () => { focusBoost = 0.9; });
+inputEl.addEventListener("blur",    () => { focusBoost = 0; });
+inputEl.addEventListener("input",   () => { springNudge(0.008); }); // typing micro-tick
 
-inputEl.focus();
+// Prevent mobile keyboard from shifting layout — blur input on outside tap
+document.addEventListener("touchstart", e => {
+  if (!inputEl.contains(e.target) && !sendBtn.contains(e.target)) inputEl.blur();
+}, { passive: true });
+
+// ─── Boot ────────────────────────────────────────────────────────────────────
+resizeCanvas();
+glReady = initGL();
+if (!glReady) canvas.classList.add("no-webgl");
+window.addEventListener("resize", resizeCanvas);
+requestAnimationFrame(draw);
+connect();
 </script>
 </body>
 </html>
