@@ -164,11 +164,17 @@ def _patch_zip(zip_path: Path, src_pkg: Path, changed: list[tuple[Path, Path]]) 
         shutil.copy2(zip_path, backup)
         with zipfile.ZipFile(backup, "r") as old_zf:
             with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as new_zf:
+                written: set[str] = set()
                 for info in old_zf.infolist():
                     if info.filename in replacements:
                         new_zf.write(str(replacements[info.filename]), info.filename)
                     else:
                         new_zf.writestr(info, old_zf.read(info.filename))
+                    written.add(info.filename)
+                # Add brand-new .pyc entries that don't exist in the zip yet.
+                for zip_name, pyc_path in replacements.items():
+                    if zip_name not in written:
+                        new_zf.write(str(pyc_path), zip_name)
         backup.unlink(missing_ok=True)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
