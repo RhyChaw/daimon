@@ -24,8 +24,9 @@ import urllib.parse
 from . import memory
 from .keystrokes import AccessibilityRequired, play_spotify_recent, play_spotify_search
 from .resources import script_path
-from .senses import get_weather, read_calendar
+from .senses import NeedsUserInput, get_weather, read_calendar
 from .speech import speak as _speak_async
+from . import projects as _projects
 
 
 def _say(text):
@@ -110,6 +111,32 @@ def _play_music_action(query, app_name="Spotify"):
     return _play_music(query=query, app_name=app_name)
 
 
+def _open_in_claude_code(project: str) -> str:
+    name = str(project).strip()
+    path = _projects.resolve(name)
+    if path is None:
+        known = _projects.known_aliases()
+        known_str = ", ".join(known) if known else "none yet"
+        raise NeedsUserInput(
+            f"I don't have a project called {name}. "
+            f"Known projects: {known_str}."
+        )
+    if not path.is_dir():
+        raise NeedsUserInput(
+            f"The path for {name} doesn't exist on disk: {path}"
+        )
+    # AppleScript: open a new Terminal window at the project path and start claude.
+    # Path is single-quoted for the shell cd command inside the do script string.
+    script = (
+        'tell application "Terminal"\n'
+        f"    do script \"cd '{path}' && claude\"\n"
+        '    activate\n'
+        'end tell'
+    )
+    subprocess.run(["osascript", "-e", script], check=True)
+    return f"Opened {name} in Claude Code."
+
+
 ACTION_SCHEMA = {
     "say":            {"risk": "auto",    "args": ["text"],                 "handler": _say,            "desc": "speak text aloud"},
     "open_url":       {"risk": "auto",    "args": ["url"],                  "handler": _open_url,       "desc": "open an http/https URL in the browser"},
@@ -118,6 +145,7 @@ ACTION_SCHEMA = {
     "draft_email":    {"risk": "auto",    "args": ["to", "subject", "body"], "handler": _draft_email,    "desc": "create a visible email draft (does NOT send)"},
     "send_email":     {"risk": "confirm", "args": ["to", "subject", "body"], "handler": _send_email,     "desc": "send an email (irreversible; requires Touch ID)"},
     "remember":       {"risk": "auto",    "args": ["key", "value"],          "handler": _remember,       "desc": "save a personal fact the user stated (e.g. prof → contact) for later recall"},
-    "read_calendar":  {"risk": "auto",    "args": ["query"],                   "handler": _read_calendar,  "desc": "read today's remaining Calendar events", "optional_args": ["query"]},
-    "get_weather":    {"risk": "auto",    "args": ["location"],              "handler": _get_weather,    "desc": "current weather for location (optional; uses location fact if omitted)", "optional_args": ["location"]},
+    "read_calendar":         {"risk": "auto",    "args": ["query"],                    "handler": _read_calendar,          "desc": "read today's remaining Calendar events", "optional_args": ["query"]},
+    "get_weather":           {"risk": "auto",    "args": ["location"],                 "handler": _get_weather,             "desc": "current weather for location (optional; uses location fact if omitted)", "optional_args": ["location"]},
+    "open_in_claude_code":   {"risk": "auto",    "args": ["project"],                  "handler": _open_in_claude_code,     "desc": "open a registered project in Claude Code in a new Terminal window"},
 }

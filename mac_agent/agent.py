@@ -99,6 +99,13 @@ def _system_prompt():
         "For Spotify or play requests: use play_music with the song query (no email needed). "
         "Then say to confirm. Do not use open_app for Spotify when play_music handles it."
     )
+    lines.append(
+        "To open a project in Claude Code: use open_in_claude_code(project=<alias>). "
+        "Examples: 'open my foundry project in claude code' → open_in_claude_code(project='foundry'). "
+        "'open foundry in claude' → open_in_claude_code(project='foundry'). "
+        "The result tells you what happened — relay it with say. "
+        "Never use open_app or open_url for this."
+    )
     lines.append("Output nothing except the JSON object.")
     return "\n".join(lines)
 
@@ -871,6 +878,8 @@ def _success_note(action, args, tool_result=None):
         return "read calendar"
     if action == "get_weather":
         return f"got weather for {args.get('location') or 'stored location'}"
+    if action == "open_in_claude_code":
+        return f"opened {args.get('project', '?')} in Claude Code"
     return action.replace("_", " ")
 
 
