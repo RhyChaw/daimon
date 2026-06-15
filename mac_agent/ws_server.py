@@ -55,15 +55,39 @@ def broadcast(event: dict) -> None:
 async def _ws_handler(websocket):
     _clients.add(websocket)
     try:
+        # Tell a freshly connected client about any live PTY session.
+        try:
+            from . import term_session as _ts
+            if _ts.is_active():
+                await websocket.send(json.dumps({"type": "term_open"}))
+        except Exception:
+            pass
+
         async for raw in websocket:
             try:
                 msg = json.loads(raw)
             except (json.JSONDecodeError, ValueError):
                 continue
-            if msg.get("type") == "user":
+
+            t = msg.get("type")
+            if t == "user":
                 text = str(msg.get("text", "")).strip()
                 if text:
                     inbox.put(text)
+            elif t == "term_in":
+                data = msg.get("data", "")
+                if data:
+                    try:
+                        from . import term_session as _ts
+                        _ts.write_input(data.encode("utf-8"))
+                    except Exception:
+                        pass
+            elif t == "term_resize":
+                try:
+                    from . import term_session as _ts
+                    _ts.resize(int(msg.get("cols", 80)), int(msg.get("rows", 24)))
+                except Exception:
+                    pass
     finally:
         _clients.discard(websocket)
 

@@ -101,11 +101,12 @@ def _system_prompt():
     )
     lines.append(
         "To open a project in Claude Code: use open_in_claude_code(project=<alias>, prompt=<optional message>). "
+        "This starts a live embedded Claude Code session in the daimon UI terminal panel. "
         "Examples: 'open foundry in claude code' → open_in_claude_code(project='foundry'). "
-        "'open foundry in claude and say hi' → open_in_claude_code(project='foundry', prompt='hi'). "
         "'open foundry and ask it to fix the login bug' → open_in_claude_code(project='foundry', prompt='fix the login bug'). "
-        "The prompt is sent as the first message inside Claude Code — do NOT use the say verb for it. "
-        "Relay the returned result string with say. Never use open_app or open_url for this."
+        "The prompt is sent as the first message to claude — do NOT use say for it. "
+        "Add mode='terminal' only if the user explicitly asks for a separate Terminal window. "
+        "Relay the result with say."
     )
     lines.append("Output nothing except the JSON object.")
     return "\n".join(lines)

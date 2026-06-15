@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&family=Inter:ital,wght@0,300;0,400;0,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
 <style>
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,8 +44,6 @@ body {
   touch-action: manipulation;
   position: relative;
 }
-
-/* depth radial field — makes the void feel like space */
 body::before {
   content: '';
   position: fixed; inset: 0;
@@ -73,23 +72,29 @@ body::before {
   flex-shrink: 0; z-index: 1; user-select: none;
 }
 
-/* ── Stage (orb area) ───────────────────────────────────────────────────── */
+/* ── Stage ──────────────────────────────────────────────────────────────── */
 #stage {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   gap: 18px; position: relative; z-index: 1;
+  transition: flex 0.35s ease, min-height 0.35s ease;
 }
+body.term-active #stage {
+  flex: 0 0 auto;
+  min-height: 0;
+  gap: 10px;
+  padding-bottom: 4px;
+}
+body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
 
-/* outer ring that holds the orb canvas + motes */
 #orb-outer {
   width: var(--stage); height: var(--stage);
   position: relative;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  transition: width 0.35s ease, height 0.35s ease;
 }
-
-/* WebGL canvas — the actual orb */
 #orb-canvas {
   width: var(--orb); height: var(--orb);
   border-radius: 50%;
@@ -97,9 +102,8 @@ body::before {
   will-change: transform, box-shadow;
   transform-origin: center;
   cursor: default;
+  transition: width 0.35s ease, height 0.35s ease;
 }
-
-/* CSS fallback when WebGL unavailable */
 #orb-canvas.no-webgl {
   background: radial-gradient(circle at 38% 34%, #5577ff, #1122aa);
   box-shadow: 0 0 55px 18px rgba(68,100,255,0.40),
@@ -108,7 +112,7 @@ body::before {
 }
 @keyframes css-breathe { 0%,100%{transform:scale(1);}50%{transform:scale(1.04);} }
 
-/* ── Motes (orbiting particles — thinking state) ─────────────────────── */
+/* ── Motes ──────────────────────────────────────────────────────────────── */
 .mote {
   position: absolute; width: 4px; height: 4px;
   border-radius: 50%; background: rgba(175,95,255,0.75);
@@ -121,21 +125,20 @@ body::before {
 .mote:nth-child(1){ animation: orb1 4.8s linear infinite; }
 .mote:nth-child(2){ animation: orb2 6.0s linear infinite; animation-delay:-2.0s; }
 .mote:nth-child(3){ animation: orb3 3.9s linear infinite; animation-delay:-1.0s; }
-
 @keyframes orb1 {
-  0%   { transform: rotate(0deg)   translateX(var(--mote-r)) scale(1.0); }
-  50%  { transform: rotate(180deg) translateX(var(--mote-r)) scale(0.7); }
-  100% { transform: rotate(360deg) translateX(var(--mote-r)) scale(1.0); }
+  0%  { transform:rotate(0deg)   translateX(var(--mote-r)) scale(1.0); }
+  50% { transform:rotate(180deg) translateX(var(--mote-r)) scale(0.7); }
+  100%{ transform:rotate(360deg) translateX(var(--mote-r)) scale(1.0); }
 }
 @keyframes orb2 {
-  0%   { transform: rotate(120deg)  translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
-  50%  { transform: rotate(300deg)  translateX(calc(var(--mote-r)*1.1)) scale(1.1); }
-  100% { transform: rotate(480deg)  translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
+  0%  { transform:rotate(120deg) translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
+  50% { transform:rotate(300deg) translateX(calc(var(--mote-r)*1.1)) scale(1.1); }
+  100%{ transform:rotate(480deg) translateX(calc(var(--mote-r)*1.1)) scale(0.8); }
 }
 @keyframes orb3 {
-  0%   { transform: rotate(240deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
-  50%  { transform: rotate(420deg) translateX(calc(var(--mote-r)*.88)) scale(0.6); }
-  100% { transform: rotate(600deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
+  0%  { transform:rotate(240deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
+  50% { transform:rotate(420deg) translateX(calc(var(--mote-r)*.88)) scale(0.6); }
+  100%{ transform:rotate(600deg) translateX(calc(var(--mote-r)*.88)) scale(1.2); }
 }
 
 /* ── State label ────────────────────────────────────────────────────────── */
@@ -165,9 +168,7 @@ body::before {
   white-space: nowrap;
 }
 @keyframes chip-in { to { opacity:1; transform:translateY(0) scale(1); } }
-.chip::before {
-  content:''; width:5px; height:5px; border-radius:50%; flex-shrink:0;
-}
+.chip::before { content:''; width:5px; height:5px; border-radius:50%; flex-shrink:0; }
 .chip-auto {
   background: rgba(68,110,240,0.09); border: 1px solid rgba(68,110,240,0.26);
   color: rgba(140,158,255,0.88);
@@ -190,11 +191,9 @@ body::before {
 }
 #gate-overlay.visible { display: flex; animation: gate-bg-in 0.28s ease; }
 @keyframes gate-bg-in { from{opacity:0;} to{opacity:1;} }
-
 #gate-card {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
-  padding: 36px 40px 30px;
-  border-radius: 26px;
+  padding: 36px 40px 30px; border-radius: 26px;
   background: rgba(14,14,22,0.88);
   border: 1px solid rgba(240,138,38,0.24);
   box-shadow: 0 0 55px rgba(240,138,38,0.10),
@@ -212,8 +211,7 @@ body::before {
   border: 1.5px solid rgba(240,138,38,0.42);
   display: flex; align-items: center; justify-content: center;
   font-size: 24px; color: rgba(255,178,78,0.92);
-  box-shadow: 0 0 22px rgba(240,138,38,0.18),
-              inset 0 0 14px rgba(240,138,38,0.08);
+  box-shadow: 0 0 22px rgba(240,138,38,0.18), inset 0 0 14px rgba(240,138,38,0.08);
   animation: gate-ring-pulse 1.9s ease-in-out infinite;
 }
 @keyframes gate-ring-pulse {
@@ -221,16 +219,10 @@ body::before {
   50%      { box-shadow: 0 0 38px rgba(240,138,38,0.38), inset 0 0 20px rgba(240,138,38,0.16); }
 }
 #gate-action {
-  font-family: var(--font-display);
-  font-size: 14.5px; font-weight: 600;
-  color: rgba(240,242,255,0.90);
-  text-align: center; line-height: 1.4; letter-spacing: 0.01em;
+  font-family: var(--font-display); font-size: 14.5px; font-weight: 600;
+  color: rgba(240,242,255,0.90); text-align: center; line-height: 1.4; letter-spacing: 0.01em;
 }
-.gate-hint {
-  font-size: 12px; font-weight: 300;
-  color: rgba(180,185,220,0.42);
-  text-align: center; line-height: 1.5;
-}
+.gate-hint { font-size: 12px; font-weight: 300; color: rgba(180,185,220,0.42); text-align: center; line-height: 1.5; }
 
 /* ── Transcript ─────────────────────────────────────────────────────────── */
 #transcript {
@@ -239,19 +231,68 @@ body::before {
   max-height: 26vh; overflow-y: auto;
   display: flex; flex-direction: column; gap: 12px;
   scrollbar-width: none; flex-shrink: 0; z-index: 1;
+  transition: max-height 0.35s ease, opacity 0.35s ease;
 }
+body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; }
 #transcript::-webkit-scrollbar { display: none; }
-.msg {
-  font-size: 13.5px; line-height: 1.62;
-  opacity: 0; transform: translateY(5px);
-  animation: msg-in 0.3s ease forwards;
-}
+.msg { font-size: 13.5px; line-height: 1.62; opacity: 0; transform: translateY(5px); animation: msg-in 0.3s ease forwards; }
 @keyframes msg-in { to { opacity:1; transform:translateY(0); } }
-.msg-user {
-  color: var(--text-dim); text-align: right;
-  font-size: 13px; font-weight: 300;
-}
+.msg-user { color: var(--text-dim); text-align: right; font-size: 13px; font-weight: 300; }
 .msg-daimon { color: rgba(215,225,255,0.88); font-weight: 300; }
+
+/* ── Terminal panel ─────────────────────────────────────────────────────── */
+#term-panel {
+  width: 100%; max-width: 900px;
+  flex: 0 0 0px; overflow: hidden;
+  display: flex; flex-direction: column;
+  background: rgba(3,3,12,0.98);
+  border-top: 1px solid rgba(255,255,255,0.055);
+  z-index: 2;
+  transition: flex-basis 0.35s ease;
+}
+#term-panel.visible { flex: 1 1 0; min-height: 200px; }
+
+#term-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px 6px;
+  background: rgba(255,255,255,0.022);
+  border-bottom: 1px solid rgba(255,255,255,0.042);
+  flex-shrink: 0; user-select: none;
+}
+#term-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(55,210,100,0.85);
+  box-shadow: 0 0 6px rgba(55,210,100,0.55);
+  flex-shrink: 0; transition: background 0.4s, box-shadow 0.4s;
+}
+#term-dot.dead { background: rgba(200,50,50,0.5); box-shadow: none; }
+#term-title {
+  font-family: var(--font-display); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(170,180,225,0.45); flex: 1;
+}
+#term-close {
+  background: none; border: none; padding: 0 2px;
+  color: rgba(170,180,225,0.28); font-size: 18px; line-height: 1;
+  cursor: pointer; transition: color 0.2s; -webkit-tap-highlight-color: transparent;
+}
+#term-close:hover { color: rgba(255,90,90,0.65); }
+
+#term-container {
+  flex: 1; overflow: hidden;
+  padding: 4px 6px 2px;
+}
+/* xterm.js overrides */
+#term-container .xterm { height: 100%; }
+#term-container .xterm-viewport {
+  overflow-y: scroll !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.10) transparent;
+}
+#term-container .xterm-viewport::-webkit-scrollbar { width: 4px; }
+#term-container .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.10); border-radius: 2px;
+}
 
 /* ── Input bar ──────────────────────────────────────────────────────────── */
 #input-bar {
@@ -276,10 +317,7 @@ body::before {
   scrollbar-width: none;
 }
 #input::-webkit-scrollbar { display: none; }
-#input:focus {
-  border-color: rgba(95,135,255,0.32);
-  background: rgba(255,255,255,0.066);
-}
+#input:focus { border-color: rgba(95,135,255,0.32); background: rgba(255,255,255,0.066); }
 #input::placeholder { color: rgba(255,255,255,0.13); }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 50%;
@@ -294,7 +332,7 @@ body::before {
 }
 .icon-btn:hover { background: rgba(55,75,200,0.18); border-color: rgba(95,125,255,0.38); }
 .icon-btn:active { transform: scale(0.87); }
-#mic-btn { font-size: 14px; opacity: 0.55; } /* mic: coming soon */
+#mic-btn { font-size: 14px; opacity: 0.55; }
 </style>
 </head>
 <body>
@@ -323,10 +361,20 @@ body::before {
   <div id="chips"></div>
 </div>
 
+<!-- Terminal panel (hidden until term_open) -->
+<div id="term-panel">
+  <div id="term-header">
+    <div id="term-dot"></div>
+    <span id="term-title">Claude Code</span>
+    <button id="term-close" aria-label="Close">×</button>
+  </div>
+  <div id="term-container"></div>
+</div>
+
 <!-- Transcript -->
 <div id="transcript"></div>
 
-<!-- Input -->
+<!-- Input (Daimon commands) -->
 <div id="input-bar">
   <textarea id="input" placeholder="Ask Daimon something…" rows="1"
             autocomplete="off" autocorrect="off" spellcheck="false"
@@ -335,386 +383,388 @@ body::before {
   <button class="icon-btn" id="send-btn" aria-label="Send">↑</button>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js"></script>
 <script>
 "use strict";
-// ─── WS URL (preserve existing contract) ─────────────────────────────────────
 const WS_URL = `ws://${location.hostname}:8765`;
 
-// ─── DOM refs ────────────────────────────────────────────────────────────────
-const canvas     = document.getElementById("orb-canvas");
-const chipsEl    = document.getElementById("chips");
-const txEl       = document.getElementById("transcript");
-const inputEl    = document.getElementById("input");
-const sendBtn    = document.getElementById("send-btn");
-const gateEl     = document.getElementById("gate-overlay");
-const gateAction = document.getElementById("gate-action");
-const connDot    = document.getElementById("conn");
-const stateLabel = document.getElementById("state-label");
-const orbOuter   = document.getElementById("orb-outer");
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const canvas        = document.getElementById("orb-canvas");
+const chipsEl       = document.getElementById("chips");
+const txEl          = document.getElementById("transcript");
+const inputEl       = document.getElementById("input");
+const sendBtn       = document.getElementById("send-btn");
+const gateEl        = document.getElementById("gate-overlay");
+const gateAction    = document.getElementById("gate-action");
+const connDot       = document.getElementById("conn");
+const stateLabel    = document.getElementById("state-label");
+const orbOuter      = document.getElementById("orb-outer");
+const termPanelEl   = document.getElementById("term-panel");
+const termDot       = document.getElementById("term-dot");
+const termTitleEl   = document.getElementById("term-title");
+const termCloseBtn  = document.getElementById("term-close");
+const termContainer = document.getElementById("term-container");
 
-// ─── WebGL shader sources ─────────────────────────────────────────────────────
+// ── xterm.js ─────────────────────────────────────────────────────────────────
+const term = new Terminal({
+  theme: {
+    background:          "#030310",
+    foreground:          "#d2d8f0",
+    cursor:              "#7799ff",
+    cursorAccent:        "#030310",
+    selectionBackground: "rgba(95,135,255,0.22)",
+    black:   "#1a1a2e", red:     "#ff6b6b", green:   "#4ecdc4", yellow:  "#ffe66d",
+    blue:    "#6c8ebf", magenta: "#c792ea", cyan:    "#89ddff", white:   "#d2d8f0",
+    brightBlack:   "#3a3a5c", brightRed:     "#ff8a80", brightGreen:   "#69f0ae",
+    brightYellow:  "#ffd740", brightBlue:    "#82b1ff", brightMagenta: "#e040fb",
+    brightCyan:    "#a0dfe4", brightWhite:   "#ffffff",
+  },
+  fontFamily: '"JetBrains Mono","Cascadia Code","Fira Code","Menlo",monospace',
+  fontSize: 13,
+  lineHeight: 1.38,
+  cursorStyle: "bar",
+  cursorBlink: true,
+  scrollback: 5000,
+  allowTransparency: true,
+  convertEol: false,
+});
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+
+let termMounted = false;
+let termActivityTimer = null;
+
+function _mountTerm() {
+  if (termMounted) return;
+  term.open(termContainer);
+  termMounted = true;
+  // Forward keystrokes to the PTY
+  term.onData(data => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "term_in", data }));
+    }
+  });
+  // Keep xterm filled when container resizes (orientation change, keyboard, etc.)
+  new ResizeObserver(() => {
+    if (termPanelEl.classList.contains("visible")) {
+      try { fitAddon.fit(); } catch(_) {}
+      _sendResize();
+    }
+  }).observe(termContainer);
+}
+
+function _sendResize() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "term_resize", cols: term.cols, rows: term.rows }));
+  }
+}
+
+function _openTerm(project) {
+  _mountTerm();
+  document.body.classList.add("term-active");
+  termPanelEl.classList.add("visible");
+  termDot.classList.remove("dead");
+  termTitleEl.textContent = "Claude Code" + (project ? " · " + project : "");
+  // Resize after CSS transition completes
+  setTimeout(() => {
+    try { fitAddon.fit(); } catch(_) {}
+    _sendResize();
+    resizeCanvas();
+  }, 380);
+}
+
+function _closeTerm() {
+  termDot.classList.add("dead");
+  clearTimeout(termActivityTimer);
+  daimon.setState("idle");
+}
+
+termCloseBtn.addEventListener("click", () => {
+  termPanelEl.classList.remove("visible");
+  document.body.classList.remove("term-active");
+  setTimeout(resizeCanvas, 380);
+  daimon.setState("idle");
+});
+
+// ── WebGL shader ─────────────────────────────────────────────────────────────
 const VERT = `
 attribute vec2 a_pos;
 void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
-
 const FRAG = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
   precision highp float;
 #else
   precision mediump float;
 #endif
-
 uniform float u_t;
 uniform vec2  u_res;
-uniform vec3  u_c1;
-uniform vec3  u_c2;
-uniform vec3  u_cr;
-uniform float u_turb;
-uniform float u_spd;
-uniform float u_pulse;
-uniform float u_rim;
+uniform vec3  u_c1, u_c2, u_cr;
+uniform float u_turb, u_spd, u_pulse, u_rim;
 
-// ---- Simplex 2D noise (Stefan Gustavson) ------------------------------------
-vec3 _m289(vec3 x){ return x - floor(x*(1.0/289.0))*289.0; }
-vec2 _m289v(vec2 x){ return x - floor(x*(1.0/289.0))*289.0; }
-vec3 _perm(vec3 x){ return _m289(((x*34.0)+1.0)*x); }
-
+vec3 _m289(vec3 x){ return x - floor(x*(1./289.))*289.; }
+vec2 _m289v(vec2 x){ return x - floor(x*(1./289.))*289.; }
+vec3 _perm(vec3 x){ return _m289(((x*34.)+1.)*x); }
 float sn(vec2 v){
-  const vec4 C = vec4(0.211324865405187,0.366025403784439,
-                     -0.577350269189626,0.024390243902439);
-  vec2 i  = floor(v + dot(v, C.yy));
-  vec2 x0 = v - i + dot(i, C.xx);
-  vec2 i1  = (x0.x > x0.y) ? vec2(1.0,0.0) : vec2(0.0,1.0);
-  vec4 x12 = x0.xyxy + C.xxzz;
-  x12.xy  -= i1;
-  i = _m289v(i);
-  vec3 p = _perm(_perm(i.y + vec3(0.0,i1.y,1.0)) + i.x + vec3(0.0,i1.x,1.0));
-  vec3 m  = max(0.5 - vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)), 0.0);
-  m = m*m; m = m*m;
-  vec3 xv = 2.0*fract(p*C.www) - 1.0;
-  vec3 h  = abs(xv) - 0.5;
-  vec3 ox = floor(xv + 0.5);
-  vec3 a0 = xv - ox;
-  m *= 1.79284291400159 - 0.85373472095314*(a0*a0 + h*h);
-  vec3 g;
-  g.x  = a0.x*x0.x  + h.x*x0.y;
-  g.yz = a0.yz*x12.xz + h.yz*x12.yw;
-  return 130.0 * dot(m, g);
+  const vec4 C=vec4(.211324865405187,.366025403784439,-.577350269189626,.024390243902439);
+  vec2 i=floor(v+dot(v,C.yy)), x0=v-i+dot(i,C.xx);
+  vec2 i1=(x0.x>x0.y)?vec2(1.,0.):vec2(0.,1.);
+  vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1;
+  i=_m289v(i);
+  vec3 p=_perm(_perm(i.y+vec3(0.,i1.y,1.))+i.x+vec3(0.,i1.x,1.));
+  vec3 m=max(.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.);
+  m=m*m; m=m*m;
+  vec3 xv=2.*fract(p*C.www)-1., h=abs(xv)-.5, ox=floor(xv+.5), a0=xv-ox;
+  m*=1.79284291400159-.85373472095314*(a0*a0+h*h);
+  vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw;
+  return 130.*dot(m,g);
 }
-
 float fbm(vec2 p, float spd){
-  float v = 0.0, a = 0.5;
-  for(int i=0; i<4; i++){
-    v += a * sn(p + vec2(u_t*spd*(0.28+float(i)*0.08),
-                         u_t*spd*(0.19+float(i)*0.06)));
-    p  = p*2.1 + vec2(3.17+float(i), 1.73+float(i)*0.9);
-    a *= 0.5;
+  float v=0.,a=.5;
+  for(int i=0;i<4;i++){
+    v+=a*sn(p+vec2(u_t*spd*(.28+float(i)*.08),u_t*spd*(.19+float(i)*.06)));
+    p=p*2.1+vec2(3.17+float(i),1.73+float(i)*.9); a*=.5;
   }
   return v;
 }
-// -----------------------------------------------------------------------------
-
 void main(){
-  // UV in [-1,1], square canvas
-  vec2 uv = (gl_FragCoord.xy / u_res) * 2.0 - 1.0;
-  float r  = length(uv);
-
-  float mask = smoothstep(1.0, 0.84, r);
-  if(mask < 0.002){ gl_FragColor = vec4(0.0); return; }
-
-  // Fake sphere normal → Fresnel
-  float nz      = sqrt(max(0.0, 1.0 - r*r));
-  float fresnel  = pow(1.0 - nz, 2.8);
-
-  // Domain-warped FBM — slower when turb is low (idle = barely drifting)
-  float spd = u_spd;
-  vec2  q   = vec2(sn(uv*1.9 + vec2(u_t*spd*0.38, 0.0)),
-                   sn(uv*1.9 + vec2(0.0, u_t*spd*0.32) + vec2(5.2,1.3)));
-  float plasma = fbm(uv*2.2 + q*(u_turb*1.3), spd)*0.5 + 0.5;
-
-  // Core luminous spot (off-center upper-left like a light source)
-  vec2  cOff = vec2(-0.11, 0.17);
-  float cDist = length(uv - cOff);
-  float core  = exp(-cDist * 3.1) * (0.58 + 0.42*u_pulse);
-
-  // Radial color blend + plasma perturbation
-  float radT = clamp(r*0.72 + plasma*u_turb*0.38, 0.0, 1.0);
-  vec3  col  = mix(u_c1, u_c2, radT);
-
-  // Fresnel rim
-  col = mix(col, u_cr, fresnel * u_rim);
-
-  // Core bloom
-  col += u_c1 * core * 0.62;
-
-  // Subtle inner highlight (specular-ish)
-  float spec = exp(-length(uv - vec2(-0.19,0.22))*5.5);
-  col += vec3(0.28, 0.32, 0.45) * spec * (1.0 - u_turb*0.6);
-
-  // Soft Reinhard tonemap
-  col = col / (col + 0.42) * 1.42;
-
-  gl_FragColor = vec4(clamp(col,0.0,1.0)*mask, mask);
+  vec2 uv=(gl_FragCoord.xy/u_res)*2.-1.;
+  float r=length(uv);
+  float mask=smoothstep(1.,.84,r);
+  if(mask<.002){ gl_FragColor=vec4(0.); return; }
+  float nz=sqrt(max(0.,1.-r*r));
+  float fresnel=pow(1.-nz,2.8);
+  float spd=u_spd;
+  vec2 q=vec2(sn(uv*1.9+vec2(u_t*spd*.38,0.)),sn(uv*1.9+vec2(0.,u_t*spd*.32)+vec2(5.2,1.3)));
+  float plasma=fbm(uv*2.2+q*(u_turb*1.3),spd)*.5+.5;
+  vec2 cOff=vec2(-.11,.17); float cDist=length(uv-cOff);
+  float core=exp(-cDist*3.1)*(.58+.42*u_pulse);
+  float radT=clamp(r*.72+plasma*u_turb*.38,0.,1.);
+  vec3 col=mix(u_c1,u_c2,radT);
+  col=mix(col,u_cr,fresnel*u_rim);
+  col+=u_c1*core*.62;
+  float spec=exp(-length(uv-vec2(-.19,.22))*5.5);
+  col+=vec3(.28,.32,.45)*spec*(1.-u_turb*.6);
+  col=col/(col+.42)*1.42;
+  gl_FragColor=vec4(clamp(col,0.,1.)*mask,mask);
 }
 `;
 
-// ─── WebGL init ───────────────────────────────────────────────────────────────
-let gl = null, prog = null, aPos = -1, ub = {};
-let glReady = false;
+let gl=null, prog=null, aPos=-1, ub={}, glReady=false;
 
 function initGL() {
-  const opts = { alpha:true, premultipliedAlpha:false, antialias:false, powerPreference:"default" };
-  gl = canvas.getContext("webgl", opts) || canvas.getContext("experimental-webgl", opts);
+  const opts = {alpha:true,premultipliedAlpha:false,antialias:false,powerPreference:"default"};
+  gl = canvas.getContext("webgl",opts)||canvas.getContext("experimental-webgl",opts);
   if (!gl) return false;
-
-  function mkShader(type, src) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.warn("Shader:", gl.getShaderInfoLog(s)); return null;
-    }
+  function mkShader(type,src){
+    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.warn(gl.getShaderInfoLog(s));return null;}
     return s;
   }
-  const vs = mkShader(gl.VERTEX_SHADER, VERT);
-  const fs = mkShader(gl.FRAGMENT_SHADER, FRAG);
-  if (!vs || !fs) return false;
-
-  prog = gl.createProgram();
-  gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.warn("Link:", gl.getProgramInfoLog(prog)); return false;
-  }
-
-  const quad = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
-  const buf  = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
-
+  const vs=mkShader(gl.VERTEX_SHADER,VERT), fs=mkShader(gl.FRAGMENT_SHADER,FRAG);
+  if(!vs||!fs) return false;
+  prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){console.warn(gl.getProgramInfoLog(prog));return false;}
+  const quad=new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]);
+  const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf); gl.bufferData(gl.ARRAY_BUFFER,quad,gl.STATIC_DRAW);
   gl.useProgram(prog);
-  aPos = gl.getAttribLocation(prog, "a_pos");
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
+  aPos=gl.getAttribLocation(prog,"a_pos"); gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
   ["u_t","u_res","u_c1","u_c2","u_cr","u_turb","u_spd","u_pulse","u_rim"]
-    .forEach(n => { ub[n] = gl.getUniformLocation(prog, n); });
-
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    .forEach(n=>{ub[n]=gl.getUniformLocation(prog,n);});
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
   return true;
 }
 
 function resizeCanvas() {
-  const dpr  = Math.min(devicePixelRatio || 1, 2);
-  const css  = parseFloat(getComputedStyle(canvas).width) || 180;
-  const px   = Math.round(css * dpr);
-  if (canvas.width !== px) {
-    canvas.width = px; canvas.height = px;
-    if (gl) gl.viewport(0, 0, px, px);
-  }
+  const dpr=Math.min(devicePixelRatio||1,2);
+  const css=parseFloat(getComputedStyle(canvas).width)||180;
+  const px=Math.round(css*dpr);
+  if(canvas.width!==px){canvas.width=px;canvas.height=px;if(gl)gl.viewport(0,0,px,px);}
 }
 
-// ─── State definitions ────────────────────────────────────────────────────────
-// c1=core, c2=outer, cr=rim, turb=turbulence, spd=noise speed,
-// rim=fresnel rim intensity, pulseAmp=breathe %, pulsePer=period ms,
-// scale=base scale, motes=bool,
-// bRGB=bloom color [r,g,b], bA=near opacity, bR=near radius,
-// bfA=far opacity, bfR=far radius
+// ── State params ──────────────────────────────────────────────────────────────
 const ST = {
-  idle:     { c1:[.27,.50,1.],   c2:[.06,.13,.60],  cr:[.56,.78,1.],
-              turb:.09,  spd:.13, rim:.55, pulseAmp:.026, pulsePer:3400, scale:1.00, motes:false,
-              bRGB:[68,110,255],  bA:.34, bR:52, bfA:.11, bfR:98 },
-  listening:{ c1:[.18,.94,.55],  c2:[.04,.37,.22],  cr:[.44,.98,.64],
-              turb:.27,  spd:.37, rim:.47, pulseAmp:.036, pulsePer:1600, scale:1.024,motes:false,
-              bRGB:[50,210,120],  bA:.42, bR:58, bfA:.13, bfR:108 },
-  thinking: { c1:[.60,.18,1.],   c2:[.17,.05,.57],  cr:[.88,.47,1.],
-              turb:.68,  spd:.70, rim:.64, pulseAmp:.046, pulsePer:950,  scale:1.00, motes:true,
-              bRGB:[145,55,255],  bA:.42, bR:63, bfA:.14, bfR:118 },
-  acting:   { c1:[.08,.87,1.],   c2:[.01,.27,.57],  cr:[.27,.94,1.],
-              turb:.44,  spd:.51, rim:.51, pulseAmp:.036, pulsePer:760,  scale:1.014,motes:false,
-              bRGB:[28,195,240],  bA:.47, bR:60, bfA:.15, bfR:112 },
-  speaking: { c1:[1.,.80,.22],   c2:[.64,.31,.02],  cr:[1.,.91,.54],
-              turb:.21,  spd:.31, rim:.47, pulseAmp:.050, pulsePer:1200, scale:1.01, motes:false,
-              bRGB:[255,188,38],  bA:.47, bR:66, bfA:.15, bfR:122 },
-  gate:     { c1:[1.,.51,.10],   c2:[.57,.15,.02],  cr:[1.,.71,.21],
-              turb:.05,  spd:.07, rim:.80, pulseAmp:.016, pulsePer:2200, scale:.940, motes:false,
-              bRGB:[240,118,28],  bA:.58, bR:36, bfA:.20, bfR:68 },
+  idle:     {c1:[.27,.50,1.], c2:[.06,.13,.60], cr:[.56,.78,1.], turb:.09, spd:.13, rim:.55, pulseAmp:.026,pulsePer:3400,scale:1.00,motes:false, bRGB:[68,110,255], bA:.34,bR:52,bfA:.11,bfR:98},
+  listening:{c1:[.18,.94,.55], c2:[.04,.37,.22], cr:[.44,.98,.64], turb:.27, spd:.37, rim:.47, pulseAmp:.036,pulsePer:1600,scale:1.024,motes:false, bRGB:[50,210,120], bA:.42,bR:58,bfA:.13,bfR:108},
+  thinking: {c1:[.60,.18,1.], c2:[.17,.05,.57], cr:[.88,.47,1.], turb:.68, spd:.70, rim:.64, pulseAmp:.046,pulsePer:950, scale:1.00,motes:true,  bRGB:[145,55,255],  bA:.42,bR:63,bfA:.14,bfR:118},
+  acting:   {c1:[.08,.87,1.], c2:[.01,.27,.57], cr:[.27,.94,1.], turb:.44, spd:.51, rim:.51, pulseAmp:.036,pulsePer:760, scale:1.014,motes:false, bRGB:[28,195,240],  bA:.47,bR:60,bfA:.15,bfR:112},
+  speaking: {c1:[1.,.80,.22], c2:[.64,.31,.02], cr:[1.,.91,.54], turb:.21, spd:.31, rim:.47, pulseAmp:.050,pulsePer:1200,scale:1.01,motes:false, bRGB:[255,188,38],  bA:.47,bR:66,bfA:.15,bfR:122},
+  gate:     {c1:[1.,.51,.10], c2:[.57,.15,.02], cr:[1.,.71,.21], turb:.05, spd:.07, rim:.80, pulseAmp:.016,pulsePer:2200,scale:.940,motes:false,  bRGB:[240,118,28],  bA:.58,bR:36,bfA:.20,bfR:68},
 };
 
-// ─── Lerped current values (start at idle) ────────────────────────────────────
-function cloneState(s) {
-  return {
-    c1:[...s.c1], c2:[...s.c2], cr:[...s.cr],
-    turb:s.turb, spd:s.spd, rim:s.rim, scale:s.scale,
-    bRGB:[...s.bRGB], bA:s.bA, bR:s.bR, bfA:s.bfA, bfR:s.bfR,
-  };
-}
-const cur = cloneState(ST.idle);
-let tgtName = "idle", prevName = "idle";
+function cloneState(s){return{c1:[...s.c1],c2:[...s.c2],cr:[...s.cr],turb:s.turb,spd:s.spd,rim:s.rim,scale:s.scale,bRGB:[...s.bRGB],bA:s.bA,bR:s.bR,bfA:s.bfA,bfR:s.bfR};}
+const cur=cloneState(ST.idle);
+let tgtName="idle", prevName="idle";
+let nudgePos=0, nudgeVel=0, focusBoost=0;
+const T0=performance.now();
 
-// ─── Spring nudge system (micro-reactivity) ───────────────────────────────────
-let nudgePos = 0, nudgeVel = 0;
-let focusBoost = 0;
-const T0 = performance.now();
+function springNudge(v){nudgeVel+=v;}
+function settleNudge(){nudgeVel-=0.028;}
 
-function springNudge(strength) { nudgeVel += strength; }
-function settleNudge()         { nudgeVel -= 0.028; }   // dip then spring up
-
-// ─── Mote + label management ──────────────────────────────────────────────────
 function applyStateExtras(name) {
-  const s = ST[name];
-  orbOuter.classList.toggle("moteing", s.motes);
-  if (name === "idle") { stateLabel.classList.remove("visible"); }
-  else { stateLabel.textContent = name; stateLabel.classList.add("visible"); }
-  if (name === "idle" && prevName !== "idle") settleNudge();
+  const s=ST[name];
+  orbOuter.classList.toggle("moteing",s.motes);
+  if(name==="idle"){stateLabel.classList.remove("visible");}
+  else{stateLabel.textContent=name;stateLabel.classList.add("visible");}
+  if(name==="idle"&&prevName!=="idle")settleNudge();
 }
 
-// ─── Draw loop ────────────────────────────────────────────────────────────────
-const LR = 0.065;  // lerp rate per frame (60 fps target)
-function lv(a, b, t){ for(let i=0;i<a.length;i++) a[i]+=(b[i]-a[i])*t; }
-function ln(a, b, t){ return a + (b-a)*t; }
+// ── Draw loop ─────────────────────────────────────────────────────────────────
+const LR=0.065;
+function lv(a,b,t){for(let i=0;i<a.length;i++)a[i]+=(b[i]-a[i])*t;}
+function ln(a,b,t){return a+(b-a)*t;}
 
 function draw(now) {
   requestAnimationFrame(draw);
-  const t   = (now - T0) / 1000;
-  const tgt = ST[tgtName];
+  const t=(now-T0)/1000, tgt=ST[tgtName];
+  lv(cur.c1,tgt.c1,LR);lv(cur.c2,tgt.c2,LR);lv(cur.cr,tgt.cr,LR);
+  cur.turb=ln(cur.turb,tgt.turb,LR*.78);
+  cur.spd =ln(cur.spd, tgt.spd, LR*.70);
+  cur.rim =ln(cur.rim, tgt.rim, LR);
+  cur.scale=ln(cur.scale,tgt.scale,LR);
+  lv(cur.bRGB,tgt.bRGB,LR*.8);
+  cur.bA=ln(cur.bA,tgt.bA,LR);cur.bR=ln(cur.bR,tgt.bR,LR);
+  cur.bfA=ln(cur.bfA,tgt.bfA,LR);cur.bfR=ln(cur.bfR,tgt.bfR,LR);
 
-  // Lerp all numeric state values
-  lv(cur.c1, tgt.c1, LR); lv(cur.c2, tgt.c2, LR); lv(cur.cr, tgt.cr, LR);
-  cur.turb  = ln(cur.turb, tgt.turb, LR*0.78);
-  cur.spd   = ln(cur.spd,  tgt.spd,  LR*0.70);
-  cur.rim   = ln(cur.rim,  tgt.rim,  LR);
-  cur.scale = ln(cur.scale,tgt.scale, LR);
-  lv(cur.bRGB, tgt.bRGB, LR*0.8);
-  cur.bA  = ln(cur.bA,  tgt.bA,  LR);
-  cur.bR  = ln(cur.bR,  tgt.bR,  LR);
-  cur.bfA = ln(cur.bfA, tgt.bfA, LR);
-  cur.bfR = ln(cur.bfR, tgt.bfR, LR);
+  const breathe=Math.sin(t*2*Math.PI/(tgt.pulsePer/1000))*tgt.pulseAmp;
+  const SPRING=26,DAMP=5.8,DT=0.016;
+  nudgeVel+=(-nudgePos*SPRING-nudgeVel*DAMP)*DT;
+  nudgePos+=nudgeVel*DT;
+  focusBoost=ln(focusBoost,0,.07);
 
-  // Breathing pulse + spring nudge
-  const breathe  = Math.sin(t * 2*Math.PI / (tgt.pulsePer/1000)) * tgt.pulseAmp;
-  const SPRING = 26, DAMP = 5.8, DT = 0.016;
-  nudgeVel += (-nudgePos*SPRING - nudgeVel*DAMP) * DT;
-  nudgePos += nudgeVel * DT;
-  focusBoost = ln(focusBoost, 0, 0.07);
+  const totalScale=cur.scale+breathe+nudgePos+focusBoost*.014;
+  canvas.style.transform=`scale(${totalScale.toFixed(4)})`;
 
-  const totalScale = cur.scale + breathe + nudgePos + focusBoost*0.014;
-  canvas.style.transform = `scale(${totalScale.toFixed(4)})`;
-
-  // Bloom via box-shadow (lerped color + sizes)
-  const [r,g,b] = cur.bRGB.map(v=>Math.round(v));
-  canvas.style.boxShadow = [
+  const[r,g,b]=cur.bRGB.map(v=>Math.round(v));
+  canvas.style.boxShadow=[
     `0 0 ${cur.bR.toFixed(1)}px ${(cur.bR*.28).toFixed(1)}px rgba(${r},${g},${b},${cur.bA.toFixed(3)})`,
     `0 0 ${cur.bfR.toFixed(1)}px ${(cur.bfR*.32).toFixed(1)}px rgba(${r},${g},${b},${cur.bfA.toFixed(3)})`,
   ].join(",");
 
-  // WebGL render
-  if (!glReady) return;
-  const pulse = Math.sin(t * 2*Math.PI / (tgt.pulsePer/1000)) * 0.5 + 0.5;
-  gl.clearColor(0,0,0,0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.uniform1f(ub.u_t,    t);
-  gl.uniform2f(ub.u_res,  canvas.width, canvas.height);
-  gl.uniform3fv(ub.u_c1,  cur.c1);
-  gl.uniform3fv(ub.u_c2,  cur.c2);
-  gl.uniform3fv(ub.u_cr,  cur.cr);
-  gl.uniform1f(ub.u_turb, cur.turb);
-  gl.uniform1f(ub.u_spd,  cur.spd);
-  gl.uniform1f(ub.u_pulse,pulse);
-  gl.uniform1f(ub.u_rim,  cur.rim);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if(!glReady)return;
+  const pulse=Math.sin(t*2*Math.PI/(tgt.pulsePer/1000))*.5+.5;
+  gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform1f(ub.u_t,t);gl.uniform2f(ub.u_res,canvas.width,canvas.height);
+  gl.uniform3fv(ub.u_c1,cur.c1);gl.uniform3fv(ub.u_c2,cur.c2);gl.uniform3fv(ub.u_cr,cur.cr);
+  gl.uniform1f(ub.u_turb,cur.turb);gl.uniform1f(ub.u_spd,cur.spd);
+  gl.uniform1f(ub.u_pulse,pulse);gl.uniform1f(ub.u_rim,cur.rim);
+  gl.drawArrays(gl.TRIANGLES,0,6);
 }
 
-// ─── daimon UI API — exact contract preserved ─────────────────────────────────
+// ── daimon API (exact contract) ───────────────────────────────────────────────
 const daimon = {
   setState(state) {
-    if (!ST[state]) return;
-    prevName = tgtName;
-    tgtName  = state;
+    if(!ST[state])return;
+    prevName=tgtName; tgtName=state;
     applyStateExtras(state);
-    if (state === "idle") setTimeout(() => { chipsEl.innerHTML = ""; }, 800);
+    if(state==="idle")setTimeout(()=>{chipsEl.innerHTML="";},800);
   },
-  say(text)            { _appendMsg(text, "msg-daimon"); },
-  proposeAction(verb, risk) {
-    const c = document.createElement("div");
-    c.className = `chip chip-${risk}`;
-    c.textContent = verb.replace(/_/g, "​ ");
+  say(text)                 { _appendMsg(text,"msg-daimon"); },
+  proposeAction(verb,risk)  {
+    const c=document.createElement("div");
+    c.className=`chip chip-${risk}`;
+    c.textContent=verb.replace(/_/g,"​ ");
     chipsEl.appendChild(c);
   },
-  requestGate(label) {
-    gateAction.textContent = label || "Confirm action";
-    gateEl.classList.add("visible");
-  },
-  closeGate() { gateEl.classList.remove("visible"); },
+  requestGate(label) { gateAction.textContent=label||"Confirm action"; gateEl.classList.add("visible"); },
+  closeGate()        { gateEl.classList.remove("visible"); },
 };
 
-function _appendMsg(text, cls) {
-  const el = document.createElement("div");
-  el.className = `msg ${cls}`;
-  el.textContent = text;
+function _appendMsg(text,cls) {
+  const el=document.createElement("div");
+  el.className=`msg ${cls}`; el.textContent=text;
   txEl.appendChild(el);
-  requestAnimationFrame(() => { txEl.scrollTop = txEl.scrollHeight; });
+  requestAnimationFrame(()=>{txEl.scrollTop=txEl.scrollHeight;});
 }
 
-// ─── WebSocket ────────────────────────────────────────────────────────────────
-let ws = null, reconnTimer = null;
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+let ws=null, reconnTimer=null;
 
 function connect() {
-  ws = new WebSocket(WS_URL);
-  ws.addEventListener("open",  () => { connDot.classList.add("ok"); clearTimeout(reconnTimer); });
-  ws.addEventListener("close", () => {
+  ws=new WebSocket(WS_URL);
+  ws.addEventListener("open",()=>{connDot.classList.add("ok");clearTimeout(reconnTimer);});
+  ws.addEventListener("close",()=>{
     connDot.classList.remove("ok");
     daimon.setState("idle"); daimon.closeGate();
-    reconnTimer = setTimeout(connect, 2000);
+    reconnTimer=setTimeout(connect,2000);
   });
-  ws.addEventListener("error", () => ws.close());
-  ws.addEventListener("message", ({ data }) => {
-    let msg; try { msg = JSON.parse(data); } catch { return; }
-    switch (msg.type) {
-      case "state":      daimon.setState(msg.state);               break;
-      case "say":        daimon.say(msg.text);                     break;
-      case "action":     daimon.proposeAction(msg.verb, msg.risk); break;
-      case "gate":       daimon.requestGate(msg.label);            break;
-      case "gate_close": daimon.closeGate();                       break;
+  ws.addEventListener("error",()=>ws.close());
+  ws.addEventListener("message",({data})=>{
+    let msg; try{msg=JSON.parse(data);}catch{return;}
+    switch(msg.type){
+      case "state":      daimon.setState(msg.state);              break;
+      case "say":        daimon.say(msg.text);                    break;
+      case "action":     daimon.proposeAction(msg.verb,msg.risk); break;
+      case "gate":       daimon.requestGate(msg.label);           break;
+      case "gate_close": daimon.closeGate();                      break;
+
+      case "term_open":
+        _openTerm(msg.project||"");
+        daimon.setState("acting");
+        break;
+
+      case "term":
+        if(msg.data){
+          // Auto-open panel if server sends data without explicit term_open (reconnect)
+          if(!termPanelEl.classList.contains("visible"))_openTerm("");
+          term.write(Uint8Array.from(atob(msg.data), c=>c.charCodeAt(0)));
+          // Orb reacts to activity: acting while output flows, listening when quiet
+          daimon.setState("acting");
+          clearTimeout(termActivityTimer);
+          termActivityTimer=setTimeout(()=>{
+            if(termPanelEl.classList.contains("visible"))daimon.setState("listening");
+          },1600);
+        }
+        break;
+
+      case "term_close":
+        _closeTerm();
+        break;
     }
   });
 }
 
-// ─── Input handling + micro-reactivity ───────────────────────────────────────
-function _resizeInput() {
-  inputEl.style.height = "auto";
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+// ── Input ─────────────────────────────────────────────────────────────────────
+function _resizeInput(){
+  inputEl.style.height="auto";
+  inputEl.style.height=Math.min(inputEl.scrollHeight,160)+"px";
 }
 
 function sendMessage() {
-  const text = inputEl.value.trim();
-  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-  inputEl.value = "";
-  inputEl.style.height = "auto";
+  const text=inputEl.value.trim();
+  if(!text||!ws||ws.readyState!==WebSocket.OPEN)return;
+  inputEl.value=""; inputEl.style.height="auto";
   springNudge(0.055);
-  _appendMsg(text, "msg-user");
-  ws.send(JSON.stringify({ type:"user", text }));
+  _appendMsg(text,"msg-user");
+  ws.send(JSON.stringify({type:"user",text}));
   daimon.setState("thinking");
 }
 
-sendBtn.addEventListener("click", sendMessage);
-inputEl.addEventListener("keydown", e => {
-  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+sendBtn.addEventListener("click",sendMessage);
+inputEl.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}
 });
-inputEl.addEventListener("focus",   () => { focusBoost = 0.9; });
-inputEl.addEventListener("blur",    () => { focusBoost = 0; });
-inputEl.addEventListener("input",   () => { _resizeInput(); springNudge(0.008); });
+inputEl.addEventListener("focus",()=>{focusBoost=0.9;});
+inputEl.addEventListener("blur",()=>{focusBoost=0;});
+inputEl.addEventListener("input",()=>{_resizeInput();springNudge(0.008);});
 
-// Prevent mobile keyboard from shifting layout — blur input on outside tap
-document.addEventListener("touchstart", e => {
-  if (!inputEl.contains(e.target) && !sendBtn.contains(e.target)) inputEl.blur();
-}, { passive: true });
+document.addEventListener("touchstart",e=>{
+  if(!inputEl.contains(e.target)&&!sendBtn.contains(e.target))inputEl.blur();
+},{passive:true});
 
-// ─── Boot ────────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
 resizeCanvas();
-glReady = initGL();
-if (!glReady) canvas.classList.add("no-webgl");
-window.addEventListener("resize", resizeCanvas);
+glReady=initGL();
+if(!glReady)canvas.classList.add("no-webgl");
+window.addEventListener("resize",()=>{
+  resizeCanvas();
+  if(termPanelEl.classList.contains("visible")){
+    try{fitAddon.fit();}catch(_){}
+    _sendResize();
+  }
+});
 requestAnimationFrame(draw);
 connect();
 </script>

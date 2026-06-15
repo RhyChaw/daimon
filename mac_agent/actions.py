@@ -111,7 +111,12 @@ def _play_music_action(query, app_name="Spotify"):
     return _play_music(query=query, app_name=app_name)
 
 
-def _open_in_claude_code(project: str, prompt: str | None = None) -> str:
+def _sq(s: str) -> str:
+    """Shell single-quote a string."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _open_in_claude_code(project: str, prompt: str | None = None, mode: str = "term") -> str:
     name = str(project).strip()
     path = _projects.resolve(name)
     if path is None:
@@ -125,29 +130,39 @@ def _open_in_claude_code(project: str, prompt: str | None = None) -> str:
         raise NeedsUserInput(
             f"The path for {name} doesn't exist on disk: {path}"
         )
-    # Build shell command. Single-quote the path; single-quote the prompt with
-    # escaped interior single quotes ('\'').  Pass prompt as a positional arg
-    # to `claude` so it starts an interactive session with that first message.
-    def _sq(s: str) -> str:
-        return "'" + s.replace("'", "'\\''") + "'"
+
+    if mode == "terminal":
+        # Open a macOS Terminal window — legacy / explicit override.
+        if prompt and prompt.strip():
+            cmd = f"cd {_sq(str(path))} && claude {_sq(prompt.strip())}"
+        else:
+            cmd = f"cd {_sq(str(path))} && claude"
+        as_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
+        script = (
+            'tell application "Terminal"\n'
+            f'    do script "{as_cmd}"\n'
+            '    activate\n'
+            'end tell'
+        )
+        subprocess.run(["osascript", "-e", script], check=True)
+        return f"Opened {name} in a Terminal window."
+
+    # Default: PTY session embedded in the daimon UI.
+    from . import term_session, events
+    session = term_session.start_session(str(path))
+    events.emit({"type": "term_open", "cwd": str(path), "project": name})
 
     if prompt and prompt.strip():
-        cmd = f"cd {_sq(str(path))} && claude {_sq(prompt.strip())}"
-        result_msg = f"Opened {name} in Claude Code with your message."
-    else:
-        cmd = f"cd {_sq(str(path))} && claude"
-        result_msg = f"Opened {name} in Claude Code."
+        import time
+        import threading
+        def _send_after_start() -> None:
+            time.sleep(2.8)  # wait for zsh login + claude to initialise
+            if term_session.is_active():
+                term_session.write_input((prompt.strip() + "\r").encode())
+        threading.Thread(target=_send_after_start, daemon=True).start()
+        return f"Claude Code session started in {name} — sending your message."
 
-    # Escape any double-quotes in cmd so the AppleScript string stays valid.
-    as_cmd = cmd.replace("\\", "\\\\").replace('"', '\\"')
-    script = (
-        'tell application "Terminal"\n'
-        f'    do script "{as_cmd}"\n'
-        '    activate\n'
-        'end tell'
-    )
-    subprocess.run(["osascript", "-e", script], check=True)
-    return result_msg
+    return f"Claude Code session started in {name}."
 
 
 ACTION_SCHEMA = {
@@ -160,5 +175,5 @@ ACTION_SCHEMA = {
     "remember":       {"risk": "auto",    "args": ["key", "value"],          "handler": _remember,       "desc": "save a personal fact the user stated (e.g. prof → contact) for later recall"},
     "read_calendar":         {"risk": "auto",    "args": ["query"],                    "handler": _read_calendar,          "desc": "read today's remaining Calendar events", "optional_args": ["query"]},
     "get_weather":           {"risk": "auto",    "args": ["location"],                 "handler": _get_weather,             "desc": "current weather for location (optional; uses location fact if omitted)", "optional_args": ["location"]},
-    "open_in_claude_code":   {"risk": "auto",    "args": ["project", "prompt"],         "handler": _open_in_claude_code,     "desc": "open a registered project in Claude Code; optional prompt is sent as the first message to claude", "optional_args": ["prompt"]},
+    "open_in_claude_code":   {"risk": "auto",    "args": ["project", "prompt", "mode"], "handler": _open_in_claude_code,     "desc": "start an embedded Claude Code session in the daimon UI for a registered project; optional prompt sent as first message; mode='terminal' opens a Terminal window instead", "optional_args": ["prompt", "mode"]},
 }
