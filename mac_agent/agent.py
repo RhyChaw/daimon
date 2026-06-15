@@ -63,8 +63,8 @@ def _system_prompt():
     for name, spec in ACTION_SCHEMA.items():
         lines.append(f'  - {name}(args: {", ".join(spec["args"])}) — {spec["desc"]}')
     lines.append('When the user says "say <text>", use say with that exact text (keep apostrophes).')
-    lines.append('For greetings and chat (hi, hello, how are you), use say with a friendly helpful reply.')
-    lines.append('If the request does not fit an action, use "say" to ask a clarifying question.')
+    lines.append('For greetings, chat, math, facts, trivia, or any general question: use say to answer directly and helpfully. Example: "what is 1+1" → {"action":"say","args":{"text":"2"}}')
+    lines.append('If the request is truly ambiguous and fits no action and has no clear answer, use say to ask one clarifying question.')
     lines.append('When the user says "remember …", use remember to store the fact (key + value).')
     lines.append(
         "If Known facts show a contact with no email on file, use say to ask for their email — "
