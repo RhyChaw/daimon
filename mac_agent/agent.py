@@ -100,11 +100,12 @@ def _system_prompt():
         "Then say to confirm. Do not use open_app for Spotify when play_music handles it."
     )
     lines.append(
-        "To open a project in Claude Code: use open_in_claude_code(project=<alias>). "
-        "Examples: 'open my foundry project in claude code' → open_in_claude_code(project='foundry'). "
-        "'open foundry in claude' → open_in_claude_code(project='foundry'). "
-        "The result tells you what happened — relay it with say. "
-        "Never use open_app or open_url for this."
+        "To open a project in Claude Code: use open_in_claude_code(project=<alias>, prompt=<optional message>). "
+        "Examples: 'open foundry in claude code' → open_in_claude_code(project='foundry'). "
+        "'open foundry in claude and say hi' → open_in_claude_code(project='foundry', prompt='hi'). "
+        "'open foundry and ask it to fix the login bug' → open_in_claude_code(project='foundry', prompt='fix the login bug'). "
+        "The prompt is sent as the first message inside Claude Code — do NOT use the say verb for it. "
+        "Relay the returned result string with say. Never use open_app or open_url for this."
     )
     lines.append("Output nothing except the JSON object.")
     return "\n".join(lines)
