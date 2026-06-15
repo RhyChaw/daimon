@@ -35,6 +35,7 @@ OPTIONS = {
             "Foundation",
             "PyObjCTools.AppHelper",
             "Quartz",
+            "pty",
         ],
         # Avoid strip invalidating signatures mid-build (py2app re-signs after).
         "strip": False,
