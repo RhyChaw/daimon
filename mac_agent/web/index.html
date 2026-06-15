@@ -406,46 +406,48 @@ const termTitleEl   = document.getElementById("term-title");
 const termCloseBtn  = document.getElementById("term-close");
 const termContainer = document.getElementById("term-container");
 
-// ── xterm.js ─────────────────────────────────────────────────────────────────
-const term = new Terminal({
-  theme: {
-    background:          "#030310",
-    foreground:          "#d2d8f0",
-    cursor:              "#7799ff",
-    cursorAccent:        "#030310",
-    selectionBackground: "rgba(95,135,255,0.22)",
-    black:   "#1a1a2e", red:     "#ff6b6b", green:   "#4ecdc4", yellow:  "#ffe66d",
-    blue:    "#6c8ebf", magenta: "#c792ea", cyan:    "#89ddff", white:   "#d2d8f0",
-    brightBlack:   "#3a3a5c", brightRed:     "#ff8a80", brightGreen:   "#69f0ae",
-    brightYellow:  "#ffd740", brightBlue:    "#82b1ff", brightMagenta: "#e040fb",
-    brightCyan:    "#a0dfe4", brightWhite:   "#ffffff",
-  },
-  fontFamily: '"JetBrains Mono","Cascadia Code","Fira Code","Menlo",monospace',
-  fontSize: 13,
-  lineHeight: 1.38,
-  cursorStyle: "bar",
-  cursorBlink: true,
-  scrollback: 5000,
-  allowTransparency: true,
-  convertEol: false,
-});
-const fitAddon = new FitAddon.FitAddon();
-term.loadAddon(fitAddon);
-
+// ── xterm.js (lazy — never crashes the orb if CDN is slow/unreachable) ────────
+let term = null;
+let fitAddon = null;
 let termMounted = false;
 let termActivityTimer = null;
 
+const _TERM_THEME = {
+  background:          "#030310",
+  foreground:          "#d2d8f0",
+  cursor:              "#7799ff",
+  cursorAccent:        "#030310",
+  selectionBackground: "rgba(95,135,255,0.22)",
+  black:   "#1a1a2e", red:     "#ff6b6b", green:   "#4ecdc4", yellow:  "#ffe66d",
+  blue:    "#6c8ebf", magenta: "#c792ea", cyan:    "#89ddff", white:   "#d2d8f0",
+  brightBlack:   "#3a3a5c", brightRed:     "#ff8a80", brightGreen:   "#69f0ae",
+  brightYellow:  "#ffd740", brightBlue:    "#82b1ff", brightMagenta: "#e040fb",
+  brightCyan:    "#a0dfe4", brightWhite:   "#ffffff",
+};
+
 function _mountTerm() {
   if (termMounted) return;
-  term.open(termContainer);
   termMounted = true;
-  // Forward keystrokes to the PTY
-  term.onData(data => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "term_in", data }));
-    }
+  if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+    termContainer.innerHTML =
+      '<p style="padding:20px;color:rgba(255,80,80,0.55);font-family:monospace;font-size:12px">' +
+      'xterm.js failed to load — check network connectivity.</p>';
+    return;
+  }
+  term = new Terminal({
+    theme: _TERM_THEME,
+    fontFamily: '"JetBrains Mono","Cascadia Code","Fira Code","Menlo",monospace',
+    fontSize: 13, lineHeight: 1.38,
+    cursorStyle: "bar", cursorBlink: true,
+    scrollback: 5000, allowTransparency: true, convertEol: false,
   });
-  // Keep xterm filled when container resizes (orientation change, keyboard, etc.)
+  fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(termContainer);
+  term.onData(data => {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: "term_in", data }));
+  });
   new ResizeObserver(() => {
     if (termPanelEl.classList.contains("visible")) {
       try { fitAddon.fit(); } catch(_) {}
@@ -455,9 +457,12 @@ function _mountTerm() {
 }
 
 function _sendResize() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "term_resize", cols: term.cols, rows: term.rows }));
-  }
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify({
+      type: "term_resize",
+      cols: term ? term.cols : 80,
+      rows: term ? term.rows : 24,
+    }));
 }
 
 function _openTerm(project) {
@@ -466,9 +471,8 @@ function _openTerm(project) {
   termPanelEl.classList.add("visible");
   termDot.classList.remove("dead");
   termTitleEl.textContent = "Claude Code" + (project ? " · " + project : "");
-  // Resize after CSS transition completes
   setTimeout(() => {
-    try { fitAddon.fit(); } catch(_) {}
+    if (fitAddon) try { fitAddon.fit(); } catch(_) {}
     _sendResize();
     resizeCanvas();
   }, 380);
@@ -709,7 +713,7 @@ function connect() {
         if(msg.data){
           // Auto-open panel if server sends data without explicit term_open (reconnect)
           if(!termPanelEl.classList.contains("visible"))_openTerm("");
-          term.write(Uint8Array.from(atob(msg.data), c=>c.charCodeAt(0)));
+          if(term) term.write(Uint8Array.from(atob(msg.data), c=>c.charCodeAt(0)));
           // Orb reacts to activity: acting while output flows, listening when quiet
           daimon.setState("acting");
           clearTimeout(termActivityTimer);
@@ -761,7 +765,7 @@ if(!glReady)canvas.classList.add("no-webgl");
 window.addEventListener("resize",()=>{
   resizeCanvas();
   if(termPanelEl.classList.contains("visible")){
-    try{fitAddon.fit();}catch(_){}
+    if(fitAddon)try{fitAddon.fit();}catch(_){}
     _sendResize();
   }
 });
