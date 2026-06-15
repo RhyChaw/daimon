@@ -257,21 +257,25 @@ body::before {
 #input-bar {
   width: 100%; max-width: 510px;
   padding: 10px 18px max(20px, env(safe-area-inset-bottom, 20px));
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: flex-end; gap: 8px;
   flex-shrink: 0; z-index: 1;
 }
 #input {
   flex: 1;
   background: rgba(255,255,255,0.046);
   border: 1px solid rgba(255,255,255,0.076);
-  border-radius: 22px;
+  border-radius: 18px;
   color: var(--text);
   font-family: var(--font-body); font-size: 15px; font-weight: 400;
-  padding: 11px 18px; outline: none;
+  padding: 10px 18px; outline: none;
   transition: border-color 0.24s, background 0.24s;
   caret-color: #7799ff;
   -webkit-appearance: none; appearance: none;
+  resize: none; overflow-y: auto; overflow-x: hidden;
+  line-height: 1.5; min-height: 42px; max-height: 160px;
+  scrollbar-width: none;
 }
+#input::-webkit-scrollbar { display: none; }
 #input:focus {
   border-color: rgba(95,135,255,0.32);
   background: rgba(255,255,255,0.066);
@@ -324,9 +328,9 @@ body::before {
 
 <!-- Input -->
 <div id="input-bar">
-  <input id="input" type="text" placeholder="Ask Daimon something…"
-         autocomplete="off" autocorrect="off" spellcheck="false"
-         enterkeyhint="send" inputmode="text">
+  <textarea id="input" placeholder="Ask Daimon something…" rows="1"
+            autocomplete="off" autocorrect="off" spellcheck="false"
+            enterkeyhint="send"></textarea>
   <button class="icon-btn" id="mic-btn" aria-label="Voice">🎙</button>
   <button class="icon-btn" id="send-btn" aria-label="Send">↑</button>
 </div>
@@ -677,11 +681,17 @@ function connect() {
 }
 
 // ─── Input handling + micro-reactivity ───────────────────────────────────────
+function _resizeInput() {
+  inputEl.style.height = "auto";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+}
+
 function sendMessage() {
   const text = inputEl.value.trim();
   if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
   inputEl.value = "";
-  springNudge(0.055);                        // send pulse
+  inputEl.style.height = "auto";
+  springNudge(0.055);
   _appendMsg(text, "msg-user");
   ws.send(JSON.stringify({ type:"user", text }));
   daimon.setState("thinking");
@@ -693,7 +703,7 @@ inputEl.addEventListener("keydown", e => {
 });
 inputEl.addEventListener("focus",   () => { focusBoost = 0.9; });
 inputEl.addEventListener("blur",    () => { focusBoost = 0; });
-inputEl.addEventListener("input",   () => { springNudge(0.008); }); // typing micro-tick
+inputEl.addEventListener("input",   () => { _resizeInput(); springNudge(0.008); });
 
 // Prevent mobile keyboard from shifting layout — blur input on outside tap
 document.addEventListener("touchstart", e => {
