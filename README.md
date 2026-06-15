@@ -1,99 +1,110 @@
-# mac-agent (v0)
+# Daimon
 
-A local-first, **gated** computer-use agent for macOS. You type a request; a
-local model (via Ollama) proposes one action from a fixed whitelist; risky
-actions stop and ask you; everything is logged. No cloud, no API key, nothing
-leaves your machine.
-
-This is the v0 spine — the loop, the whitelist, and the gate. It is deliberately
-tiny. Voice, the cloud/local split, and Touch ID come later (see Build order).
-
-## The one idea
-
-The model can only ever request a verb that exists in `mac_agent/actions.py`.
-Unknown verbs are rejected by code, not by the model's judgement. That whitelist
-is the security boundary. To let the agent do something new, you add a verb
-on purpose. Risky verbs (`send_email`) are marked `confirm` and must pass the
-gate before they run.
+A local-first Mac agent you talk to in plain English. It controls your Mac through a fixed whitelist of actions — risky ones require Touch ID before they run, and everything is logged.
 
 ```
-you type  ->  local model proposes ONE action  ->  whitelist check
-          ->  gate (if risky)  ->  execute  ->  audit log  ->  repeat
+you type  →  model proposes one action  →  whitelist check
+          →  Touch ID gate (if risky)   →  execute  →  audit log  →  repeat
 ```
+
+## What it can do
+
+| Request | What happens |
+|---|---|
+| "say good morning" | Speaks it aloud |
+| "open Hacker News" | Opens in your browser |
+| "open Spotify and play Tame Impala" | Searches and plays in Spotify |
+| "what's the weather in London" | Fetches current conditions |
+| "do I have anything today" | Reads your Calendar |
+| "remember my prof's email is kevin@uni.edu" | Stores it for future use |
+| "draft an email to my prof about the deadline" | Opens a visible Mail draft — no send |
+| "send an email to my prof saying I'll be late" | Touch ID required, then sends |
+
+Actions can chain. "Draft and send an email to me@x.com about lunch" drafts silently, then raises Touch ID for the send step only.
+
+## The security model
+
+`mac_agent/actions.py` is the whitelist — every verb the model can request is defined there. Unknown verbs are rejected by code, not by the model's judgement. Risky verbs (those that are outbound, irreversible, or touch private data) are marked `confirm` and require Touch ID before they execute. The model cannot override or bypass this.
+
+```
+risk: "auto"     →  runs without prompting     (say, open_url, open_app, play_music,
+                                                 read_calendar, get_weather, remember,
+                                                 draft_email)
+risk: "confirm"  →  Touch ID required           (send_email)
+```
+
+Every action is appended to `audit.jsonl` with its decision, auth method (`biometric` / `terminal` / `denied`), and result.
 
 ## Run it
 
-Requirements: macOS, Python 3.10+, and [Ollama](https://ollama.com).
+**Requirements:** macOS 12+, Python 3.10+, and [Ollama](https://ollama.com).
 
 ```bash
-ollama pull llama3.2            # or any model you like
-git clone <your-repo-url> mac-agent && cd mac-agent
+ollama pull llama3.2
+
+git clone <repo-url> daimon && cd daimon
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
+
 macagent start
 ```
 
-Then try:
+This runs in your terminal. Touch ID is used if pyobjc is installed; otherwise it falls back to a `y/N` prompt.
 
-```
-you > say good morning
-you > open hacker news
-you > draft an email to me@example.com about lunch tomorrow
-you > send an email to me@example.com saying the meeting moved to 3pm
-```
+## Daimon.app (recommended)
 
-The first time it controls Mail, macOS will pop its own permission dialog
-("Terminal wants to control Mail"). That prompt is the OS consent layer doing
-exactly what you want — allow it.
-
-The `send_email` step will stop and ask `Allow? [y/N]` before sending. That
-prompt is the gate. At v1 it becomes Touch ID.
-
-Every action is appended to `audit.jsonl`.
-
-## Daimon.app (standalone bundle)
-
-Package as a signed macOS app so Calendar / Mail automation and Touch ID are
-attributed to **Daimon** (`com.rhychaw.daimon`), not Terminal or Cursor.
+The bundled app runs with a proper macOS identity (`com.rhychaw.daimon`) so Calendar, Mail, and Spotify automation are attributed to Daimon rather than Terminal. Touch ID and Accessibility work reliably.
 
 ```bash
 ./scripts/build_app.sh
 open dist/Daimon.app
 ```
 
-Requirements: Ollama running locally. The app stores data in
-`~/Library/Application Support/Daimon/`.
+Data is stored in `~/Library/Application Support/Daimon/`.
 
-Risky actions (`send_email`) use **Touch ID** (passcode fallback) via
-LocalAuthentication — no terminal y/N in the `.app`. Dev CLI (`macagent start`)
-still works as before; Touch ID is used when pyobjc is installed, otherwise y/N.
+**After the first build**, grant Accessibility access once:
+> System Settings → Privacy & Security → Accessibility → add Daimon.app
 
-## What's where
+**After subsequent code changes**, `daimon start` syncs your Python edits directly into the bundle without rebuilding — the signature is preserved so the Accessibility grant carries over.
 
-| File | Role |
+```bash
+daimon start    # auto-syncs source → bundle, then launches
+```
+
+A full rebuild only runs when `pyproject.toml` or `setup_app.py` changes (i.e., a new dependency).
+
+## Backends
+
+Daimon supports two model backends, switchable in settings:
+
+| Backend | How | When to use |
+|---|---|---|
+| **Ollama** (default) | Local, no API key | Fully offline, privacy-first |
+| **Claude** | Anthropic API | Faster, stronger reasoning |
+
+Set `ANTHROPIC_API_KEY` in `.env` and switch the backend to `claude` in settings to use Claude.
+
+## Project layout
+
+| Path | Role |
 |---|---|
-| `mac_agent/actions.py` | the verb whitelist + handlers — **the security boundary** |
-| `mac_agent/gate.py` | confirmation for risky actions (terminal now, Touch ID later) |
-| `mac_agent/audit.py` | append-only log of every action |
-| `mac_agent/agent.py` | the loop: propose → check → gate → execute → log |
-| `mac_agent/ollama_client.py` | talks to the local Ollama server |
-| `mac_agent/cli.py` | `macagent start` |
-| `mac_agent/app_main.py` | py2app entry for `Daimon.app` |
-| `mac_agent/console_ui.py` | Cocoa console window for the bundled app |
-| `setup_app.py` | py2app build config + Info.plist usage strings |
-| `scripts/build_app.sh` | build + ad-hoc codesign |
-
-## Build order
-
-- **v0 (this):** local loop, whitelist, terminal gate, audit log. Prove it works.
-- **v1:** risk tiers wired to a small **signed native helper** that does the
-  real Touch ID confirmation; more verbs; undo. Plug in palace for memory
-  ("who is my prof").
-- **v2:** optional cloud orchestrator + local redaction proxy, exposed as a
-  setting (fully-local vs hybrid). Deterministic redaction first, model second.
-- **v3:** voice — whisper.cpp in, macOS speech synthesis out.
+| `mac_agent/actions.py` | Verb whitelist + handlers — **the security boundary** |
+| `mac_agent/gate.py` | Touch ID / passcode confirmation for risky actions |
+| `mac_agent/audit.py` | Append-only log of every action and its outcome |
+| `mac_agent/agent.py` | Core loop: propose → check → gate → execute → log |
+| `mac_agent/keystrokes.py` | Spotify UI automation via in-process AppleScript |
+| `mac_agent/memory.py` | Persistent fact store (contacts, preferences) |
+| `mac_agent/senses.py` | Calendar and weather readers |
+| `mac_agent/speech.py` | Text-to-speech output |
+| `mac_agent/backend.py` | Ollama and Claude backend adapters |
+| `mac_agent/app_main.py` | py2app entry point for `Daimon.app` |
+| `mac_agent/console_ui.py` | Cocoa console window inside the bundled app |
+| `mac_agent/launcher.py` | `daimon start`: sync-or-rebuild, then launch |
+| `setup_app.py` | py2app config + Info.plist |
+| `scripts/build_app.sh` | Full build + ad-hoc codesign |
 
 ## Notes
 
-- `send_email` actually sends. Everything else is safe/reversible.
-- The model proposes; this code disposes. Keep `gate.py` deterministic — never
-  let an AI decide whether an AI is allowed to act.
+- `send_email` actually sends. Everything else is safe or reversible.
+- The model proposes; this code decides. `gate.py` is deterministic — no AI involvement in whether an AI is allowed to act.
+- Spotify automation uses in-process AppleScript (not subprocess) because `osascript` cannot send keystrokes without Accessibility access attributed to a real app bundle.

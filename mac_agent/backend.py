@@ -56,12 +56,24 @@ class OllamaBackend:
 
     @classmethod
     def create(cls):
-        requested = os.environ.get("MACAGENT_MODEL", DEFAULT_OLLAMA_MODEL)
-        resolved, available = ollama_client.resolve_model(requested)
+        from .ollama_serve import ensure_serving
+
+        try:
+            ensure_serving()
+            requested = os.environ.get("MACAGENT_MODEL", DEFAULT_OLLAMA_MODEL)
+            resolved, available = ollama_client.resolve_model(requested)
+        except Exception as e:
+            return None, BackendError(
+                "Could not reach Ollama at http://localhost:11434.",
+                f"{e}\n  run: daimon start   or   ollama serve",
+            )
         if resolved:
             return cls(resolved), None
         for candidate in OLLAMA_FALLBACKS:
-            resolved, _ = ollama_client.resolve_model(candidate)
+            try:
+                resolved, _ = ollama_client.resolve_model(candidate)
+            except Exception:
+                continue
             if resolved:
                 note = (
                     f"note: {requested!r} not installed — using {resolved!r}\n"

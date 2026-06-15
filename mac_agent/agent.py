@@ -16,6 +16,7 @@ from .actions import ACTION_SCHEMA
 from .backend import BackendError, create_backend, parse_action
 from .gate import allow
 from .audit import log
+from . import events
 from . import memory
 from . import episodic
 from . import palace_memory
@@ -23,6 +24,10 @@ from . import clock
 from .senses import NeedsUserInput, ToolResult
 
 MAX_AGENT_STEPS = 5
+
+# Set to True within a turn when play_music succeeds; cleared at turn start.
+# Prevents the TTS "say" after music from pausing Spotify.
+_music_played_this_turn: bool = False
 
 _PROMPT_PREFIX = re.compile(r"^(?:you\s*>\s*)+", re.I)
 _SMART_APOS = str.maketrans({
@@ -65,6 +70,14 @@ def _system_prompt():
         "If Known facts show a contact with no email on file, use say to ask for their email — "
         "never draft_email or send_email until an address is known. "
         "NEVER ask for email for Spotify, music, or play_music requests."
+    )
+    lines.append(
+        "For email tasks ('send email to X', 'email X saying Y', 'draft email to X'): "
+        "use draft_email(to, subject, body) to open a visible reviewable draft, "
+        "or send_email(to, subject, body) to send immediately. "
+        "These actions compose the message through Mail automatically — NEVER use open_app for email. "
+        "Infer a clear subject and body from the user's description. "
+        "For 'send an email saying X': subject = concise one-liner about X, body = polite full sentence."
     )
     lines.append("If the message includes a Recently or Past similar line and the user asks what you did before, use say to answer from those events.")
     lines.append(
@@ -135,8 +148,17 @@ def _sense_action(text):
 
 
 def _say(text):
-    ACTION_SCHEMA["say"]["handler"](text=text)
+    if not _music_played_this_turn:
+        ACTION_SCHEMA["say"]["handler"](text=text)
     print(f"  -> {text}")
+
+
+def _music_say(text):
+    """Show confirmation in console/UI without TTS — avoids pausing Spotify."""
+    print(f"  -> {text}")
+    events.emit({"type": "state", "state": "speaking"})
+    events.emit({"type": "say", "text": text})
+    log(action="say", args={"text": text}, decision="allowed", auth_method="auto", ok=True)
 
 
 def _ask_for_email(label):
@@ -156,7 +178,7 @@ def _episode(task, outcome, action, args=None, agent_notes=""):
 def _save_remember(task, key, value):
     key, value = memory.store(key, value)
     print(f"  saved: {key} → {value}")
-    log(action="remember", args={"key": key, "value": value}, decision="allowed", ok=True)
+    log(action="remember", args={"key": key, "value": value}, decision="allowed", auth_method="auto", ok=True)
     _episode(task, "success", "remember", {"key": key, "value": value}, f"remembered {key}")
 
 
@@ -211,14 +233,10 @@ _PLAY_RECENT = re.compile(
 
 def _run_play_recent(user_text, app_name="Spotify"):
     music_app = _music_app_for(app_name)
-    plan = [
-        ("play_music", {"query": "recent", "app_name": music_app}),
-        ("say", {"text": f"Playing your most recent song on {music_app}."}),
-    ]
-    for action, args in plan:
-        outcome = _execute_step(user_text, action, args)
-        if outcome.status in ("done", "abort"):
-            return True
+    outcome = _execute_step(user_text, "play_music", {"query": "recent", "app_name": music_app})
+    if outcome.status in ("done", "abort"):
+        return True
+    _music_say(f"Playing your most recent song on {music_app}.")
     return True
 
 
@@ -295,15 +313,11 @@ def _split_bundled_open_play(app_name):
 
 def _run_open_and_play(user_text, app_name, track):
     music_app = _music_app_for(app_name)
-    # play_music activates Spotify and drives search via keyboard — skip open_app so TTS doesn't steal focus.
-    plan = [
-        ("play_music", {"query": track, "app_name": music_app}),
-        ("say", {"text": f"Playing {track} on {music_app}."}),
-    ]
-    for action, args in plan:
-        outcome = _execute_step(user_text, action, args)
-        if outcome.status in ("done", "abort"):
-            return True
+    outcome = _execute_step(user_text, "play_music", {"query": track, "app_name": music_app})
+    if outcome.status in ("done", "abort"):
+        return True
+    # Confirm in UI only — speaking would pause Spotify.
+    _music_say(f"Playing {track} on {music_app}.")
     return True
 
 
@@ -361,14 +375,17 @@ def _try_direct_say(user_text):
         return False
     args = {"text": text}
     print(f"  -> proposed: say({json.dumps(args, ensure_ascii=False)})   [risk: auto]")
+    events.emit({"type": "action", "verb": "say", "risk": "auto"})
+    events.emit({"type": "state", "state": "speaking"})
+    events.emit({"type": "say", "text": text})
     try:
         ACTION_SCHEMA["say"]["handler"](**args)
         print("  ok")
-        log(action="say", args=args, decision="allowed", ok=True)
+        log(action="say", args=args, decision="allowed", auth_method="auto", ok=True)
         _episode(user_text, "success", "say", args, _success_note("say", args))
     except Exception as e:
         print(f"  ! error: {e}")
-        log(action="say", args=args, decision="allowed", ok=False, error=str(e))
+        log(action="say", args=args, decision="allowed", auth_method="auto", ok=False, error=str(e))
         _episode(user_text, "failure", "say", args, str(e))
     return True
 
@@ -424,7 +441,7 @@ def _try_remember(user_text):
     parsed = memory.parse_remember(user_text)
     if parsed == "ambiguous":
         _say("I heard more than one email address. Which email belongs to whom?")
-        log(action="remember", args={}, decision="ambiguous", ok=False)
+        log(action="remember", args={}, decision="ambiguous", auth_method="auto", ok=False)
         _episode(user_text, "failure", "remember", {}, "ambiguous multi-email remember request")
         return True
     if not parsed:
@@ -498,40 +515,69 @@ def _tool_history_line(action, args, tool_data, ok):
     return f"{action}({args_json}) error:\n{tool_data}"
 
 
+_DENIED_MESSAGES = {
+    "send_email": "I didn't send that — you cancelled.",
+}
+
+
+def _denied_say(action):
+    _say(_DENIED_MESSAGES.get(action, "I didn't do that — you cancelled."))
+
+
+def _gate_label(action, args):
+    """Human-readable label for the Touch ID / gate card in the UI."""
+    parts = [action.replace("_", " ")]
+    if "to" in args and args["to"]:
+        parts.append(f"to {args['to']}")
+    if "subject" in args and args["subject"]:
+        parts.append(f"— {args['subject']}")
+    return " ".join(parts)
+
+
 def _execute_step(user_text, action, args):
     """Run one whitelisted action; return whether the turn continues, ends, or aborts."""
+    global _music_played_this_turn
     spec = ACTION_SCHEMA[action]
     risk = spec["risk"]
+    auth_method = "auto"
     print(f"  -> proposed: {action}({json.dumps(args, ensure_ascii=False)})   [risk: {risk}]")
+    events.emit({"type": "action", "verb": action, "risk": risk})
 
     if action == "remember":
         validated = memory.validate_remember(args.get("key"), args.get("value"), user_text)
         if validated == "ambiguous":
             _say("I heard more than one email address. Which email belongs to whom?")
-            log(action=action, args=args, decision="ambiguous", ok=False)
+            log(action=action, args=args, decision="ambiguous", auth_method="auto", ok=False)
             _episode(user_text, "failure", action, args, "ambiguous multi-email remember request")
             return StepOutcome("abort")
         if validated == "invalid":
             print("  [rejected] remember requires a non-empty key and value")
-            log(action=action, args=args, decision="rejected-args", ok=False)
+            log(action=action, args=args, decision="rejected-args", auth_method="auto", ok=False)
             _episode(user_text, "failure", action, args, "remember missing key or value")
             return StepOutcome("abort")
         key, value = validated
         _save_remember(user_text, key, value)
         return StepOutcome("continue", f"remember({json.dumps({'key': key, 'value': value}, ensure_ascii=False)}) → saved")
 
-    if risk == "confirm" and not allow(action, args):
-        print("  x denied")
-        log(action=action, args=args, decision="denied", ok=False)
-        _episode(user_text, "failure", action, args, f"denied {action}")
-        return StepOutcome("abort")
+    if risk == "confirm":
+        gate_label = _gate_label(action, args)
+        events.emit({"type": "state", "state": "gate"})
+        events.emit({"type": "gate", "label": gate_label})
+        granted, auth_method = allow(action, args)
+        events.emit({"type": "gate_close"})
+        if not granted:
+            print("  x denied")
+            log(action=action, args=args, decision="denied", auth_method="denied", ok=False)
+            _episode(user_text, "failure", action, args, f"denied {action}")
+            _denied_say(action)
+            return StepOutcome("abort")
 
     if "to" in args:
         email = _resolve_recipient(args["to"])
         if not email:
             label = memory.contact_label(args["to"])
             _ask_for_email(label)
-            log(action=action, args=args, decision="needs-email", ok=False)
+            log(action=action, args=args, decision="needs-email", auth_method=auth_method, ok=False)
             _episode(user_text, "partial", action, args, f"asked for {label}'s email")
             return StepOutcome("abort")
         args = {**args, "to": email}
@@ -540,30 +586,36 @@ def _execute_step(user_text, action, args):
     if action == "say":
         text = args.get("text", "")
         print(f"  -> {text}")
+        events.emit({"type": "state", "state": "speaking"})
+        events.emit({"type": "say", "text": text})
         try:
-            handler = getattr(actions_mod, spec["handler"].__name__)
-            handler(**args)
+            if not _music_played_this_turn:
+                handler = getattr(actions_mod, spec["handler"].__name__)
+                handler(**args)
         except Exception as e:
             print(f"  ! error: {e}")
-            log(action=action, args=args, decision="allowed", ok=False, error=str(e))
+            log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=False, error=str(e))
             _episode(user_text, "failure", action, args, str(e))
             return StepOutcome("abort")
         print("  ok")
-        log(action=action, args=args, decision="allowed", ok=True)
+        log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=True)
         _episode(user_text, "success", action, args, _success_note(action, args))
         return StepOutcome("done")
 
+    events.emit({"type": "state", "state": "acting"})
     try:
         handler = getattr(actions_mod, spec["handler"].__name__)
         result = handler(**args)
+        if action == "play_music":
+            _music_played_this_turn = True
     except NeedsUserInput as e:
         _say(e.message)
-        log(action=action, args=args, decision="needs-input", ok=False)
+        log(action=action, args=args, decision="needs-input", auth_method=auth_method, ok=False)
         _episode(user_text, "partial", action, args, e.message)
         return StepOutcome("abort")
     except Exception as e:
         print(f"  ! error: {e}")
-        log(action=action, args=args, decision="allowed", ok=False, error=str(e))
+        log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=False, error=str(e))
         _episode(user_text, "failure", action, args, str(e))
         return StepOutcome("abort")
 
@@ -572,11 +624,11 @@ def _execute_step(user_text, action, args):
         tool_ok = getattr(result, "ok", True)
         if tool_ok:
             print("  -> data received")
-            log(action=action, args=args, decision="allowed", ok=True)
+            log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=True)
             _episode(user_text, "success", action, args, _success_note(action, args, tool_data))
         else:
             print(f"  -> tool error: {tool_data}")
-            log(action=action, args=args, decision="allowed", ok=False, error=str(tool_data))
+            log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=False, error=str(tool_data))
             _episode(user_text, "failure", action, args, str(tool_data)[:120])
         return StepOutcome(
             "continue",
@@ -585,12 +637,12 @@ def _execute_step(user_text, action, args):
 
     if isinstance(result, str):
         print("  -> data received")
-        log(action=action, args=args, decision="allowed", ok=True)
+        log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=True)
         _episode(user_text, "success", action, args, _success_note(action, args, result))
         return StepOutcome("continue", _tool_history_line(action, args, result, True))
 
     print("  ok")
-    log(action=action, args=args, decision="allowed", ok=True)
+    log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=True)
     _episode(user_text, "success", action, args, _success_note(action, args))
     return StepOutcome("continue", f"{action}({json.dumps(args, ensure_ascii=False)}) → ok")
 
@@ -601,13 +653,34 @@ def _compound_hints(user_text):
     calendar = _sense_action(user_text) == "read_calendar" or bool(
         re.search(r"\b(calendar|schedule|my day|meetings|agenda)\b", user_text, re.I)
     )
-    if weather and calendar:
+    if weather and calendar and not _email_intent(user_text):
         hints.append(
             "This request needs both get_weather and read_calendar before your final say."
         )
     if re.search(r"\bopen\b", user_text, re.I) and re.search(r"\bplay\b", user_text, re.I):
         hints.append("Open the app first with open_app, then play_music with the track, then say.")
+    if _email_intent(user_text) and not _music_intent(user_text):
+        hints.append(
+            "Email task: use draft_email(to, subject, body) or send_email(to, subject, body). "
+            "Do NOT use open_app — Mail is opened automatically by these actions."
+        )
     return hints
+
+
+def _redirect_email_action(user_text, steps, action, args):
+    """Block open_app(Mail/Calendar) during email tasks and inject a corrective step note."""
+    if not _email_intent(user_text) or _music_intent(user_text):
+        return action, args, None
+    if action != "open_app":
+        return action, args, None
+    app = str(args.get("app_name", "")).strip().lower()
+    if app not in ("mail", "calendar"):
+        return action, args, None
+    hint = (
+        f"open_app({app}) was skipped for this email task — "
+        "use draft_email(to, subject, body) or send_email(to, subject, body) instead."
+    )
+    return None, None, hint
 
 
 def _coerce_action_args(action, args, user_text):
@@ -637,7 +710,10 @@ def _build_prompt(user_text):
     past = palace_memory.recall_summary(user_text, n=3)
     if past:
         parts.append(past)
-    if _sense_action(user_text) == "read_calendar":
+    # Don't inject schedule context for pure email requests — "today" in
+    # "email my prof saying I can't make it today" triggers read_calendar
+    # incorrectly, confusing the model into opening Calendar.
+    if _sense_action(user_text) == "read_calendar" and not _email_intent(user_text):
         schedule_facts = memory.recall_for_schedule()
         if schedule_facts:
             parts.append(f"Schedule notes:\n{schedule_facts}")
@@ -652,9 +728,20 @@ def _build_prompt(user_text):
 
 
 def handle(user_text, backend):
+    global _music_played_this_turn
     user_text = _clean_input(user_text)
     if not user_text:
         return
+    _music_played_this_turn = False
+    events.emit({"type": "state", "state": "thinking"})
+    try:
+        _handle_inner(user_text, backend)
+    finally:
+        _music_played_this_turn = False
+        events.emit({"type": "state", "state": "idle"})
+
+
+def _handle_inner(user_text, backend):
 
     if _try_remember(user_text):
         return
@@ -678,7 +765,7 @@ def handle(user_text, backend):
         for key in memory.recalled_keys_missing_email(user_text):
             label = memory.contact_label(key)
             _ask_for_email(label)
-            log(action="draft_email", args={"to": key}, decision="needs-email", ok=False)
+            log(action="draft_email", args={"to": key}, decision="needs-email", auth_method="auto", ok=False)
             _episode(
                 user_text,
                 "partial",
@@ -727,15 +814,20 @@ def handle(user_text, backend):
         if coerced == (None, None):
             if ACTION_SCHEMA.get(action) is None:
                 print(f"  [rejected] unknown action: {action!r}")
-                log(action=action, args=args, decision="rejected-unknown", ok=False)
+                log(action=action, args=args, decision="rejected-unknown", auth_method="auto", ok=False)
                 _episode(user_text, "failure", action, args, f"rejected unknown action {action!r}")
             else:
                 print(f"  [rejected] wrong args for {action}: {list(args)}")
-                log(action=action, args=args, decision="rejected-args", ok=False)
+                log(action=action, args=args, decision="rejected-args", auth_method="auto", ok=False)
                 _episode(user_text, "failure", action, args, f"rejected wrong args for {action}")
             return
 
         action, args = coerced
+        action, args, email_hint = _redirect_email_action(user_text, steps, action, args)
+        if email_hint:
+            print(f"  [email redirect] {email_hint}")
+            steps.append(email_hint)
+            continue
         action, args = _redirect_music_action(user_text, steps, action, args)
         if action == "play_music":
             spec = ACTION_SCHEMA["play_music"]
@@ -752,7 +844,7 @@ def handle(user_text, backend):
             steps.append(outcome.history_line)
 
     _say("Sorry, I couldn't finish that in time. Try breaking it into smaller steps.")
-    log(action="say", args={"text": "step cap"}, decision="step-cap", ok=False)
+    log(action="say", args={"text": "step cap"}, decision="step-cap", auth_method="auto", ok=False)
     _episode(user_text, "failure", "step-cap", {}, f"hit {MAX_AGENT_STEPS} step limit")
 
 

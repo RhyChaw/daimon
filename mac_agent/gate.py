@@ -93,7 +93,8 @@ def _terminal_confirm(action, args):
     for key, value in args.items():
         print(f"        {key}: {value}")
     answer = input("  Allow? [y/N] ").strip().lower()
-    return answer == "y"
+    granted = answer == "y"
+    return granted, "terminal" if granted else "denied"
 
 
 def _touch_id_allow(action, args):
@@ -114,16 +115,19 @@ def _touch_id_allow(action, args):
         print(f"        {key}: {value}")
 
     if run_on_main is not None and threading.current_thread() is not threading.main_thread():
-        return run_on_main(touch_id, reason)
-    return touch_id(reason)
+        granted = run_on_main(touch_id, reason)
+    else:
+        granted = touch_id(reason)
+    return granted, "biometric" if granted else "denied"
 
 
 def allow(action, args):
-    touch_id, run_on_main = _load_touch_id()
+    """Return (granted: bool, method: str) where method is biometric | terminal | denied."""
+    touch_id, _run_on_main = _load_touch_id()
     if _in_frozen_app():
         if not touch_id:
             print("\n  [!] Touch ID unavailable in this build.")
-            return False
+            return False, "denied"
         return _touch_id_allow(action, args)
 
     if touch_id:

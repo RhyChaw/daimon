@@ -124,12 +124,13 @@ class ConsoleController(NSObject):
             self.appendLog_(chunk)
 
     def inputFn(self):
+        from mac_agent import ws_server
         def read_line(prompt=""):
-            return self._input.get()
-
+            return ws_server.inbox.get()
         return read_line
 
     def submitFromField_(self, sender):
+        from mac_agent import ws_server
         text = self.inputField.stringValue().strip()
         if not text:
             return
@@ -137,10 +138,10 @@ class ConsoleController(NSObject):
         self.inputField.setStringValue_("")
         if text in ("exit", "quit"):
             self._repl_active = False
-            self._input.put(text)
+            ws_server.inbox.put(text)
             NSApplication.sharedApplication().terminate_(None)
             return
-        self._input.put(text)
+        ws_server.inbox.put(text)
         self.window.makeFirstResponder_(self.inputField)
 
     def control_textView_doCommandBySelector_(self, control, textView, commandSelector):

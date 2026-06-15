@@ -24,9 +24,11 @@ fi
 echo "Clearing quarantine (so Finder can open the app) …"
 xattr -cr "${APP}" 2>/dev/null || true
 
-echo "Ad-hoc codesigning ${APP} …"
-codesign --force --deep --sign - "${APP}"
-codesign --verify --deep --strict "${APP}"
+# Sign with Apple Development cert — stable across rebuilds, so TCC grants persist.
+CERT_NAME="Apple Development: Shrivas Mangalampalli (3BS39AS9X8)"
+echo "Signing with Apple Development certificate …"
+codesign --force --deep --sign "${CERT_NAME}" "${APP}"
+codesign --verify --deep "${APP}"
 
 echo
 echo "Bundle id: com.rhychaw.daimon"

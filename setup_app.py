@@ -27,7 +27,7 @@ OPTIONS = {
     "py2app": {
         "argv_emulation": False,
         "plist": PLIST,
-        "packages": ["mac_agent"],
+        "packages": ["mac_agent", "websockets"],
         "includes": [
             "LocalAuthentication",
             "AppKit",

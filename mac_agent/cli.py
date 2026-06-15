@@ -3,6 +3,7 @@ cli.py — the terminal entry point. `macagent start` launches the loop.
 """
 
 import argparse
+from pathlib import Path
 
 from .agent import repl
 from .backend import check_backend_ready, create_backend
@@ -18,6 +19,11 @@ def main():
     if not ok:
         print(message)
         return
+
+    from . import ws_server
+    from .resources import web_dir
+    ws_server.start(web_dir=Path(web_dir()))
+
     repl(backend_getter=create_backend)
 
 

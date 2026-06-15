@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daimon</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --idle-core:   #5577ee, #1a2d99;
+  --idle-glow:   68, 119, 238;
+  --think-core:  #bb66ff, #5511cc;
+  --think-glow:  170, 68, 255;
+  --act-core:    #44ddff, #006688;
+  --act-glow:    50, 200, 240;
+  --speak-core:  #ffdd66, #bb7700;
+  --speak-glow:  255, 200, 50;
+  --gate-core:   #ffaa44, #cc4400;
+  --gate-glow:   255, 150, 50;
+  --listen-core: #44ff88, #007733;
+  --listen-glow: 60, 220, 120;
+}
+
+body {
+  background: #07070d;
+  color: #dde;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Orb ──────────────────────────────────────────────────────────── */
+#stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  width: 100%;
+  padding: 0 20px;
+}
+
+#orb {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  position: relative;
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+  will-change: transform, box-shadow;
+}
+
+/* inner highlight blob */
+#orb::before {
+  content: "";
+  position: absolute;
+  top: 18%;
+  left: 22%;
+  width: 38%;
+  height: 28%;
+  background: rgba(255,255,255,0.28);
+  border-radius: 50%;
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+/* state classes ── background + glow injected by JS via CSS vars */
+#orb.idle {
+  background: radial-gradient(circle at 36% 34%, #6688ff, #1a2d99);
+  box-shadow:
+    0 0 40px 10px rgba(68,119,238,0.45),
+    0 0 90px 25px rgba(68,119,238,0.15);
+  animation: pulse-slow 3.2s ease-in-out infinite;
+}
+#orb.thinking {
+  background: radial-gradient(circle at 36% 34%, #cc77ff, #5511cc);
+  box-shadow:
+    0 0 50px 14px rgba(170,68,255,0.55),
+    0 0 100px 32px rgba(170,68,255,0.20);
+  animation: pulse-medium 1.3s ease-in-out infinite;
+}
+#orb.acting {
+  background: radial-gradient(circle at 36% 34%, #55eeff, #006688);
+  box-shadow:
+    0 0 50px 14px rgba(50,200,240,0.55),
+    0 0 100px 32px rgba(50,200,240,0.20);
+  animation: pulse-fast 0.85s ease-in-out infinite;
+}
+#orb.speaking {
+  background: radial-gradient(circle at 36% 34%, #ffe066, #bb7700);
+  box-shadow:
+    0 0 60px 18px rgba(255,200,50,0.60),
+    0 0 120px 40px rgba(255,200,50,0.22);
+  animation: breathe-gold 1.6s ease-in-out infinite;
+}
+#orb.gate {
+  background: radial-gradient(circle at 36% 34%, #ffbb55, #cc4400);
+  box-shadow:
+    0 0 50px 14px rgba(255,150,50,0.60),
+    0 0 110px 36px rgba(255,150,50,0.22);
+  animation: pulse-gate 0.95s ease-in-out infinite;
+}
+#orb.listening {
+  background: radial-gradient(circle at 36% 34%, #55ff99, #007733);
+  box-shadow:
+    0 0 50px 14px rgba(60,220,120,0.55),
+    0 0 100px 32px rgba(60,220,120,0.20);
+  animation: pulse-slow 2.0s ease-in-out infinite;
+}
+
+@keyframes pulse-slow   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.04);} }
+@keyframes pulse-medium { 0%,100%{transform:scale(1);}    50%{transform:scale(1.07);} }
+@keyframes pulse-fast   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.09);} }
+@keyframes pulse-gate   { 0%,100%{transform:scale(1);}    50%{transform:scale(1.07);} }
+@keyframes breathe-gold {
+  0%,100%{ transform:scale(1);    box-shadow:0 0 60px 18px rgba(255,200,50,0.60),0 0 120px 40px rgba(255,200,50,0.22); }
+  50%    { transform:scale(1.06); box-shadow:0 0 80px 26px rgba(255,200,50,0.75),0 0 150px 55px rgba(255,200,50,0.30); }
+}
+
+/* ── Action chips ─────────────────────────────────────────────────── */
+#chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  min-height: 28px;
+}
+
+.chip {
+  padding: 4px 13px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  transform: translateY(5px) scale(0.95);
+  animation: chip-in 0.28s ease forwards;
+  white-space: nowrap;
+}
+@keyframes chip-in { to { opacity:1; transform:translateY(0) scale(1); } }
+
+.chip-auto {
+  background: rgba(68,119,238,0.13);
+  border: 1px solid rgba(68,119,238,0.38);
+  color: #99aaff;
+}
+.chip-confirm {
+  background: rgba(255,150,50,0.13);
+  border: 1px solid rgba(255,150,50,0.45);
+  color: #ffbb77;
+}
+
+/* ── Gate overlay ─────────────────────────────────────────────────── */
+#gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  z-index: 50;
+  animation: fade-in 0.22s ease;
+}
+#gate-overlay.visible { display: flex; }
+@keyframes fade-in { from{opacity:0;} to{opacity:1;} }
+
+.gate-icon {
+  font-size: 58px;
+  line-height: 1;
+  filter: drop-shadow(0 0 18px rgba(255,150,50,0.6));
+  animation: gate-bob 1.1s ease-in-out infinite;
+}
+@keyframes gate-bob { 0%,100%{transform:scale(1);} 50%{transform:scale(1.1);} }
+
+#gate-label {
+  font-size: 15px;
+  color: rgba(255,255,255,0.72);
+  text-align: center;
+  max-width: 280px;
+  line-height: 1.55;
+}
+.gate-hint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.28);
+}
+
+/* ── Transcript ───────────────────────────────────────────────────── */
+#transcript {
+  width: 100%;
+  max-width: 540px;
+  padding: 0 22px;
+  max-height: 28vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+#transcript::-webkit-scrollbar { display: none; }
+
+.msg {
+  font-size: 14px;
+  line-height: 1.55;
+  opacity: 0;
+  transform: translateY(4px);
+  animation: msg-in 0.25s ease forwards;
+}
+@keyframes msg-in { to { opacity:1; transform:translateY(0); } }
+
+.msg-user   { color: rgba(200,200,255,0.42); text-align: right; }
+.msg-daimon { color: #dde8ff; }
+
+/* ── Input bar ────────────────────────────────────────────────────── */
+#input-bar {
+  width: 100%;
+  max-width: 540px;
+  padding: 12px 20px 28px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+#input {
+  flex: 1;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  color: #dde;
+  font-family: inherit;
+  font-size: 15px;
+  padding: 11px 16px;
+  outline: none;
+  transition: border-color 0.2s;
+  caret-color: #88aaff;
+}
+#input:focus  { border-color: rgba(100,140,255,0.45); }
+#input::placeholder { color: rgba(255,255,255,0.18); }
+
+#send-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(68,119,238,0.38);
+  background: rgba(68,119,238,0.14);
+  color: #99aaff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s, transform 0.1s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+#send-btn:hover  { background: rgba(68,119,238,0.30); }
+#send-btn:active { transform: scale(0.90); }
+
+/* ── Connection dot ───────────────────────────────────────────────── */
+#conn {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff4455;
+  transition: background 0.35s;
+}
+#conn.ok { background: #44ff88; }
+</style>
+</head>
+<body>
+
+<div id="conn"></div>
+
+<!-- Gate overlay -->
+<div id="gate-overlay">
+  <div class="gate-icon">⊕</div>
+  <div id="gate-label">Touch ID required</div>
+  <div class="gate-hint">Use Touch ID or your password to continue</div>
+</div>
+
+<!-- Orb + chips -->
+<div id="stage">
+  <div id="orb" class="idle"></div>
+  <div id="chips"></div>
+</div>
+
+<!-- Transcript -->
+<div id="transcript"></div>
+
+<!-- Input -->
+<div id="input-bar">
+  <input id="input" type="text" placeholder="Ask Daimon something…" autocomplete="off" spellcheck="false" />
+  <button id="send-btn" aria-label="Send">↑</button>
+</div>
+
+<script>
+"use strict";
+
+const WS_URL = `ws://${location.hostname}:8765`;
+
+const orbEl       = document.getElementById("orb");
+const chipsEl     = document.getElementById("chips");
+const transcriptEl= document.getElementById("transcript");
+const inputEl     = document.getElementById("input");
+const sendBtnEl   = document.getElementById("send-btn");
+const gateOverlay = document.getElementById("gate-overlay");
+const gateLabelEl = document.getElementById("gate-label");
+const connDot     = document.getElementById("conn");
+
+// ── daimon UI API ─────────────────────────────────────────────────────────────
+
+const daimon = {
+  setState(state) {
+    orbEl.className = state;
+    if (state === "idle") {
+      // fade chips out a beat after going idle
+      setTimeout(() => { chipsEl.innerHTML = ""; }, 900);
+    }
+  },
+
+  say(text) {
+    _appendMsg(text, "msg-daimon");
+  },
+
+  proposeAction(verb, risk) {
+    const chip = document.createElement("div");
+    chip.className = `chip chip-${risk}`;
+    chip.textContent = verb.replace(/_/g, "​ ");   // zero-width space for wrap
+    chipsEl.appendChild(chip);
+  },
+
+  requestGate(label) {
+    gateLabelEl.textContent = label || "Touch ID required";
+    gateOverlay.classList.add("visible");
+  },
+
+  closeGate() {
+    gateOverlay.classList.remove("visible");
+  },
+};
+
+function _appendMsg(text, cls) {
+  const el = document.createElement("div");
+  el.className = `msg ${cls}`;
+  el.textContent = text;
+  transcriptEl.appendChild(el);
+  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+
+let ws = null;
+let reconnTimer = null;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.addEventListener("open", () => {
+    connDot.classList.add("ok");
+    clearTimeout(reconnTimer);
+  });
+
+  ws.addEventListener("close", () => {
+    connDot.classList.remove("ok");
+    daimon.setState("idle");
+    daimon.closeGate();
+    reconnTimer = setTimeout(connect, 2000);
+  });
+
+  ws.addEventListener("error", () => ws.close());
+
+  ws.addEventListener("message", ({ data }) => {
+    let msg;
+    try { msg = JSON.parse(data); } catch { return; }
+
+    switch (msg.type) {
+      case "state":      daimon.setState(msg.state);               break;
+      case "say":        daimon.say(msg.text);                     break;
+      case "action":     daimon.proposeAction(msg.verb, msg.risk); break;
+      case "gate":       daimon.requestGate(msg.label);            break;
+      case "gate_close": daimon.closeGate();                       break;
+    }
+  });
+}
+
+connect();
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  inputEl.value = "";
+
+  _appendMsg(text, "msg-user");
+  ws.send(JSON.stringify({ type: "user", text }));
+  daimon.setState("thinking");
+}
+
+sendBtnEl.addEventListener("click", sendMessage);
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+inputEl.focus();
+</script>
+</body>
+</html>

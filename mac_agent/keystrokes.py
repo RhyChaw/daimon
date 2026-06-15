@@ -18,6 +18,39 @@ class AccessibilityRequired(RuntimeError):
     pass
 
 
+# AppleScript error numbers that indicate missing Accessibility permission.
+_AX_ERROR_CODES = frozenset({-1719, -1743, 1002, -1002, -25211})
+
+
+def _is_accessibility_error(err: dict) -> bool:
+    if err.get("NSAppleScriptErrorNumber", 0) in _AX_ERROR_CODES:
+        return True
+    msg = str(err.get("NSAppleScriptErrorMessage", "")).lower()
+    return any(p in msg for p in ("not allowed", "accessibility", "assistive"))
+
+
+def check_accessibility() -> bool:
+    """Return True if this process already has Accessibility access."""
+    try:
+        from ApplicationServices import AXIsProcessTrusted
+        return bool(AXIsProcessTrusted())
+    except Exception:
+        return True  # can't check — assume OK
+
+
+def request_accessibility() -> bool:
+    """Prompt macOS to show the Accessibility permission dialog (if not yet granted).
+
+    Returns True if access is already or newly granted.
+    The process must be restarted after the user grants access for it to take effect.
+    """
+    try:
+        from ApplicationServices import AXIsProcessTrustedWithOptions
+        return bool(AXIsProcessTrustedWithOptions({"AXTrustedCheckOptionPrompt": True}))
+    except Exception:
+        return True
+
+
 def _escape_applescript(text):
     return str(text).replace("\\", "\\\\").replace('"', '\\"')
 
@@ -37,6 +70,12 @@ def _run_applescript(source):
     script = NSAppleScript.alloc().initWithSource_(source)
     _result, err = script.executeAndReturnError_(None)
     if err is not None:
+        if _is_accessibility_error(err):
+            raise AccessibilityRequired(
+                "Daimon needs Accessibility access to send keystrokes. "
+                "Open System Settings → Privacy & Security → Accessibility, "
+                "remove Daimon if listed, then re-add it and restart the app."
+            )
         msg = err.get("NSAppleScriptErrorMessage", str(err))
         brief = err.get("NSAppleScriptErrorBriefMessage", "")
         raise RuntimeError(f"{msg} {brief}".strip())
@@ -86,6 +125,8 @@ my focusSpotify()
 my openSearch()
 my typeInSearch("{q}")
 my pressDown(5)
+my pressReturn()
+delay 2
 my pressReturn()
 '''
     else:

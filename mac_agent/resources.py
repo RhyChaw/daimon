@@ -39,3 +39,19 @@ def script_path(filename):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"script not found: {path}")
     return path
+
+
+def web_dir():
+    """Directory containing web/index.html (works in dev and in the frozen bundle)."""
+    if _frozen():
+        resource = _bundle_resources_dir()
+        if resource:
+            lib = os.path.join(resource, "lib")
+            if os.path.isdir(lib):
+                for name in sorted(os.listdir(lib)):
+                    if not name.startswith("python"):
+                        continue
+                    candidate = os.path.join(lib, name, "mac_agent", "web")
+                    if os.path.isdir(candidate):
+                        return candidate
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
