@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&family=Inter:ital,wght@0,300;0,400;0,500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css">
+<link rel="stylesheet" href="/xterm.css">
 <style>
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -383,8 +383,8 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
   <button class="icon-btn" id="send-btn" aria-label="Send">↑</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.js"></script>
+<script src="/xterm.js"></script>
+<script src="/xterm-addon-fit.js"></script>
 <script>
 "use strict";
 const WS_URL = `ws://${location.hostname}:8765`;

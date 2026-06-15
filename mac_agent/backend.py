@@ -12,8 +12,8 @@ from . import anthropic_client
 from . import ollama_client
 from . import settings
 
-DEFAULT_OLLAMA_MODEL = "llama3.2"
-OLLAMA_FALLBACKS = ("llama3.1:latest", "llama3.1:8b", "llama3:latest")
+DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
+OLLAMA_FALLBACKS = ("llama3.1:latest", "llama3.1", "llama3.2", "llama3:latest")
 
 
 class BackendError(Exception):

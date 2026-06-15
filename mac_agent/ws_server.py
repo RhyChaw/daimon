@@ -33,7 +33,14 @@ inbox: queue.Queue = queue.Queue()
 
 _clients: set = set()
 _loop: asyncio.AbstractEventLoop | None = None
-_html_bytes: bytes | None = None  # loaded once at start()
+_html_bytes: bytes | None = None   # loaded once at start()
+_static: dict[str, tuple[bytes, str]] = {}  # path → (bytes, mime)
+
+_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js":   "application/javascript; charset=utf-8",
+    ".css":  "text/css; charset=utf-8",
+}
 
 
 def broadcast(event: dict) -> None:
@@ -93,26 +100,44 @@ async def _ws_handler(websocket):
 
 
 async def _process_request(connection, request):
-    """Serve index.html for plain HTTP GETs; let WebSocket upgrades through."""
-    if request.headers.get("Upgrade", "").lower() != "websocket":
-        import http as _http
-        html = _html_bytes or b"<h1>Daimon</h1><p>index.html not found.</p>"
-        try:
-            from websockets.http11 import Response
-            from websockets.datastructures import Headers
+    """Serve static files for plain HTTP GETs; let WebSocket upgrades through."""
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return None  # proceed with WebSocket handshake
+
+    import http as _http
+    try:
+        from websockets.http11 import Response
+        from websockets.datastructures import Headers
+
+        path = getattr(request, "path", "/").split("?")[0]
+        if path in ("", "/", "/index.html"):
+            body = _html_bytes or b"<h1>Daimon</h1>"
+            mime = "text/html; charset=utf-8"
+        elif path.lstrip("/") in _static:
+            body, mime = _static[path.lstrip("/")]
+        else:
+            body = b"Not found"
+            mime = "text/plain"
             return Response(
-                status_code=_http.HTTPStatus.OK,
-                reason_phrase="OK",
-                headers=Headers([
-                    ("Content-Type", "text/html; charset=utf-8"),
-                    ("Content-Length", str(len(html))),
-                    ("Connection", "close"),
-                ]),
-                body=html,
+                status_code=_http.HTTPStatus.NOT_FOUND,
+                reason_phrase="Not Found",
+                headers=Headers([("Content-Length", str(len(body))), ("Connection", "close")]),
+                body=body,
             )
-        except Exception:
-            pass
-    return None  # proceed with WebSocket handshake
+
+        return Response(
+            status_code=_http.HTTPStatus.OK,
+            reason_phrase="OK",
+            headers=Headers([
+                ("Content-Type", mime),
+                ("Content-Length", str(len(body))),
+                ("Connection", "close"),
+            ]),
+            body=body,
+        )
+    except Exception:
+        pass
+    return None
 
 
 def _run_ws_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -140,6 +165,12 @@ def start(web_dir: Path | None = None) -> None:
 
     if web_dir and (html_path := web_dir / "index.html").is_file():
         _html_bytes = html_path.read_bytes()
+        # Load any other static files in web_dir (js, css) into memory.
+        for p in web_dir.iterdir():
+            if p.suffix in _MIME and p.name != "index.html":
+                mime = _MIME.get(p.suffix, "application/octet-stream")
+                _static[p.name] = (p.read_bytes(), mime)
+                print(f"  static  → /{p.name}  ({len(_static[p.name][0]):,}b)")
 
     _loop = asyncio.new_event_loop()
     events.subscribe(broadcast)
