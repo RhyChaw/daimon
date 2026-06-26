@@ -11,6 +11,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700&family=Inter:ital,wght@0,300;0,400;0,500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/xterm.css">
+<script type="importmap">
+{ "imports": { "three": "/three.module.js" } }
+</script>
 <style>
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,14 +23,14 @@ html { height: 100%; -webkit-text-size-adjust: none; text-size-adjust: none; }
   --bg: #030308;
   --text: #d2d8f0;
   --text-dim: rgba(180,185,220,0.34);
-  --orb: 180px;
-  --stage: 300px;
-  --mote-r: 78px;
+  --orb: 250px;
+  --stage: 380px;
+  --mote-r: 112px;
   --font-display: 'Syne', system-ui, sans-serif;
   --font-body: 'Inter', -apple-system, sans-serif;
 }
 @media (max-width: 480px) {
-  :root { --orb: 140px; --stage: 240px; --mote-r: 62px; }
+  :root { --orb: 190px; --stage: 290px; --mote-r: 86px; }
 }
 
 body {
@@ -52,15 +55,70 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* ── Connection dot ─────────────────────────────────────────────────────── */
-#conn {
-  position: fixed; top: 16px; right: 18px;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: rgba(255,55,55,0.45);
-  transition: background 0.6s;
-  z-index: 20;
+/* ── Status row (connection + model selector, centered above the input) ──── */
+#status-row {
+  align-self: center; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: 7px; margin: 0 auto 8px; z-index: 2;
 }
-#conn.ok { background: rgba(55,210,100,0.5); }
+#conn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 11px 3px 9px; border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
+  background: rgba(255,70,70,0.08);
+  border: 1px solid rgba(255,70,70,0.26);
+  color: rgba(255,150,150,0.80);
+  transition: background 0.5s, border-color 0.5s, color 0.5s;
+  user-select: none;
+}
+
+/* ── Model selector pill ────────────────────────────────────────────────── */
+#model-pill {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 9px; border-radius: 999px;
+  background: rgba(120,110,245,0.10);
+  border: 1px solid rgba(130,120,245,0.30);
+  transition: background 0.3s, border-color 0.3s;
+}
+#model-pill:hover { background: rgba(120,110,245,0.16); border-color: rgba(130,120,245,0.45); }
+#model-pill::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: #8b7bff; box-shadow: 0 0 6px rgba(139,123,255,0.8);
+  flex-shrink: 0;
+}
+#model-pill::after {
+  content: '▾'; font-size: 9px; line-height: 1;
+  color: rgba(180,175,255,0.6); pointer-events: none; margin-left: -2px;
+}
+#model-select {
+  -webkit-appearance: none; appearance: none;
+  background: transparent; border: none; outline: none;
+  font-family: var(--font-body);
+  font-size: 10px; font-weight: 500; letter-spacing: 0.04em;
+  color: rgba(190,185,255,0.92);
+  padding: 0 2px 0 0; cursor: pointer;
+}
+#model-select option { color: #1a1a2e; background: #e8e9f5; }
+#conn::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(255,70,70,0.7);
+  transition: background 0.5s, box-shadow 0.5s;
+}
+#conn::after { content: 'Offline'; }
+#conn.ok {
+  background: rgba(50,205,110,0.10);
+  border-color: rgba(50,205,110,0.34);
+  color: rgba(120,235,165,0.92);
+}
+#conn.ok::before {
+  background: #2ecd6e;
+  box-shadow: 0 0 7px rgba(46,205,110,0.85);
+  animation: conn-pulse 2.2s ease-in-out infinite;
+}
+#conn.ok::after { content: 'Connected'; }
+@keyframes conn-pulse { 0%,100%{opacity:1;} 50%{opacity:0.45;} }
 
 /* ── Wordmark ───────────────────────────────────────────────────────────── */
 #wordmark {
@@ -89,22 +147,30 @@ body.term-active #stage {
 body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
 
 #orb-outer {
-  width: var(--stage); height: var(--stage);
+  width: var(--stage); height: calc(var(--stage) * 1.12);
   position: relative;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   transition: width 0.35s ease, height 0.35s ease;
 }
-#orb-canvas {
+/* Soft state-coloured glow behind the hologram (the model itself isn't round). */
+#orb-glow {
+  position: absolute; left: 50%; top: 50%;
   width: var(--orb); height: var(--orb);
-  border-radius: 50%;
+  margin: calc(var(--orb) * -0.5) 0 0 calc(var(--orb) * -0.5);
+  border-radius: 50%; z-index: 1; pointer-events: none;
+  will-change: box-shadow;
+}
+#orb-canvas {
+  width: calc(var(--orb) * 1.15); height: calc(var(--orb) * 1.7);
   position: relative; z-index: 2;
-  will-change: transform, box-shadow;
+  will-change: transform;
   transform-origin: center;
   cursor: default;
   transition: width 0.35s ease, height 0.35s ease;
 }
 #orb-canvas.no-webgl {
+  width: var(--orb); height: var(--orb); border-radius: 50%;
   background: radial-gradient(circle at 38% 34%, #5577ff, #1122aa);
   box-shadow: 0 0 55px 18px rgba(68,100,255,0.40),
               0 0 110px 44px rgba(68,100,255,0.14);
@@ -332,12 +398,30 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 }
 .icon-btn:hover { background: rgba(55,75,200,0.18); border-color: rgba(95,125,255,0.38); }
 .icon-btn:active { transform: scale(0.87); }
-#mic-btn { font-size: 14px; opacity: 0.55; }
+.icon-btn svg { width: 18px; height: 18px; display: block; }
+#mic-btn { color: rgba(150,165,255,0.55); }
+#mic-btn:hover { color: rgba(170,185,255,0.85); }
+#mic-btn.recording {
+  color: #ff6b6b; border-color: rgba(255,90,90,0.55);
+  background: rgba(255,70,70,0.14);
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,80,80,0.45); }
+  50%     { box-shadow: 0 0 0 6px rgba(255,80,80,0); }
+}
+/* Send is the primary action — solid accent fill */
+#send-btn {
+  background: linear-gradient(150deg, #5d7bff, #3a52d8);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 3px 12px rgba(70,95,230,0.35);
+}
+#send-btn:hover { background: linear-gradient(150deg, #6f8aff, #455fe6); border-color: transparent; }
+#send-btn svg { width: 17px; height: 17px; }
 </style>
 </head>
 <body>
 
-<div id="conn"></div>
 <p id="wordmark">Daimon</p>
 
 <!-- Gate -->
@@ -352,6 +436,7 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 <!-- Orb -->
 <div id="stage">
   <div id="orb-outer">
+    <div id="orb-glow"></div>
     <canvas id="orb-canvas"></canvas>
     <div class="mote"></div>
     <div class="mote"></div>
@@ -374,19 +459,45 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 <!-- Transcript -->
 <div id="transcript"></div>
 
+<!-- Status row: connection + model selector (centered, just above the input) -->
+<div id="status-row">
+  <div id="conn"></div>
+  <div id="model-pill">
+    <select id="model-select" aria-label="Model">
+      <option value="claude">Claude</option>
+      <option value="ollama">Ollama</option>
+    </select>
+  </div>
+</div>
+
 <!-- Input (Daimon commands) -->
 <div id="input-bar">
   <textarea id="input" placeholder="Ask Daimon something…" rows="1"
             autocomplete="off" autocorrect="off" spellcheck="false"
             enterkeyhint="send"></textarea>
-  <button class="icon-btn" id="mic-btn" aria-label="Voice">🎙</button>
-  <button class="icon-btn" id="send-btn" aria-label="Send">↑</button>
+  <button class="icon-btn" id="mic-btn" aria-label="Voice">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+      <path d="M5 11a7 7 0 0 0 14 0"></path>
+      <line x1="12" y1="18" x2="12" y2="22"></line>
+    </svg>
+  </button>
+  <button class="icon-btn" id="send-btn" aria-label="Send">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="20" x2="12" y2="5"></line>
+      <path d="M5 12l7-7 7 7"></path>
+    </svg>
+  </button>
 </div>
 
 <script src="/xterm.js"></script>
 <script src="/xterm-addon-fit.js"></script>
-<script>
+<script type="module">
 "use strict";
+import * as THREE from "three";
+import { GLTFLoader } from "/GLTFLoader.js";
+import { RoomEnvironment } from "/RoomEnvironment.js";
+
 const WS_URL = `ws://${location.hostname}:8765`;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
@@ -395,11 +506,14 @@ const chipsEl       = document.getElementById("chips");
 const txEl          = document.getElementById("transcript");
 const inputEl       = document.getElementById("input");
 const sendBtn       = document.getElementById("send-btn");
+const micBtn        = document.getElementById("mic-btn");
 const gateEl        = document.getElementById("gate-overlay");
 const gateAction    = document.getElementById("gate-action");
 const connDot       = document.getElementById("conn");
 const stateLabel    = document.getElementById("state-label");
 const orbOuter      = document.getElementById("orb-outer");
+const orbGlow       = document.getElementById("orb-glow");
+const modelSelect   = document.getElementById("model-select");
 const termPanelEl   = document.getElementById("term-panel");
 const termDot       = document.getElementById("term-dot");
 const termTitleEl   = document.getElementById("term-title");
@@ -491,101 +605,74 @@ termCloseBtn.addEventListener("click", () => {
   daimon.setState("idle");
 });
 
-// ── WebGL shader ─────────────────────────────────────────────────────────────
-const VERT = `
-attribute vec2 a_pos;
-void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }
-`;
-const FRAG = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-  precision highp float;
-#else
-  precision mediump float;
-#endif
-uniform float u_t;
-uniform vec2  u_res;
-uniform vec3  u_c1, u_c2, u_cr;
-uniform float u_turb, u_spd, u_pulse, u_rim;
-
-vec3 _m289(vec3 x){ return x - floor(x*(1./289.))*289.; }
-vec2 _m289v(vec2 x){ return x - floor(x*(1./289.))*289.; }
-vec3 _perm(vec3 x){ return _m289(((x*34.)+1.)*x); }
-float sn(vec2 v){
-  const vec4 C=vec4(.211324865405187,.366025403784439,-.577350269189626,.024390243902439);
-  vec2 i=floor(v+dot(v,C.yy)), x0=v-i+dot(i,C.xx);
-  vec2 i1=(x0.x>x0.y)?vec2(1.,0.):vec2(0.,1.);
-  vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1;
-  i=_m289v(i);
-  vec3 p=_perm(_perm(i.y+vec3(0.,i1.y,1.))+i.x+vec3(0.,i1.x,1.));
-  vec3 m=max(.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.);
-  m=m*m; m=m*m;
-  vec3 xv=2.*fract(p*C.www)-1., h=abs(xv)-.5, ox=floor(xv+.5), a0=xv-ox;
-  m*=1.79284291400159-.85373472095314*(a0*a0+h*h);
-  vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw;
-  return 130.*dot(m,g);
-}
-float fbm(vec2 p, float spd){
-  float v=0.,a=.5;
-  for(int i=0;i<4;i++){
-    v+=a*sn(p+vec2(u_t*spd*(.28+float(i)*.08),u_t*spd*(.19+float(i)*.06)));
-    p=p*2.1+vec2(3.17+float(i),1.73+float(i)*.9); a*=.5;
-  }
-  return v;
-}
-void main(){
-  vec2 uv=(gl_FragCoord.xy/u_res)*2.-1.;
-  float r=length(uv);
-  float mask=smoothstep(1.,.84,r);
-  if(mask<.002){ gl_FragColor=vec4(0.); return; }
-  float nz=sqrt(max(0.,1.-r*r));
-  float fresnel=pow(1.-nz,2.8);
-  float spd=u_spd;
-  vec2 q=vec2(sn(uv*1.9+vec2(u_t*spd*.38,0.)),sn(uv*1.9+vec2(0.,u_t*spd*.32)+vec2(5.2,1.3)));
-  float plasma=fbm(uv*2.2+q*(u_turb*1.3),spd)*.5+.5;
-  vec2 cOff=vec2(-.11,.17); float cDist=length(uv-cOff);
-  float core=exp(-cDist*3.1)*(.58+.42*u_pulse);
-  float radT=clamp(r*.72+plasma*u_turb*.38,0.,1.);
-  vec3 col=mix(u_c1,u_c2,radT);
-  col=mix(col,u_cr,fresnel*u_rim);
-  col+=u_c1*core*.62;
-  float spec=exp(-length(uv-vec2(-.19,.22))*5.5);
-  col+=vec3(.28,.32,.45)*spec*(1.-u_turb*.6);
-  col=col/(col+.42)*1.42;
-  gl_FragColor=vec4(clamp(col,0.,1.)*mask,mask);
-}
-`;
-
-let gl=null, prog=null, aPos=-1, ub={}, glReady=false;
+// ── three.js globe (the holographic earth GLB) ────────────────────────────────
+// The model is a self-illuminated hologram: an emissive earth surface plus a
+// bright cyan "rays" shell that projects a beam downward. We render it faithfully
+// (no tone-mapping crush) and drive daimon state via its emissive colour.
+let renderer=null, scene=null, camera=null, mixer=null, globeHolder=null;
+let shellMat=null, surfMat=null, glReady=false;
+const _clock=new THREE.Clock();
 
 function initGL() {
-  const opts = {alpha:true,premultipliedAlpha:false,antialias:false,powerPreference:"default"};
-  gl = canvas.getContext("webgl",opts)||canvas.getContext("experimental-webgl",opts);
-  if (!gl) return false;
-  function mkShader(type,src){
-    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
-    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){console.warn(gl.getShaderInfoLog(s));return null;}
-    return s;
-  }
-  const vs=mkShader(gl.VERTEX_SHADER,VERT), fs=mkShader(gl.FRAGMENT_SHADER,FRAG);
-  if(!vs||!fs) return false;
-  prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
-  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){console.warn(gl.getProgramInfoLog(prog));return false;}
-  const quad=new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]);
-  const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf); gl.bufferData(gl.ARRAY_BUFFER,quad,gl.STATIC_DRAW);
-  gl.useProgram(prog);
-  aPos=gl.getAttribLocation(prog,"a_pos"); gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
-  ["u_t","u_res","u_c1","u_c2","u_cr","u_turb","u_spd","u_pulse","u_rim"]
-    .forEach(n=>{ub[n]=gl.getUniformLocation(prog,n);});
-  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  try {
+    renderer=new THREE.WebGLRenderer({
+      canvas, alpha:true, antialias:true, powerPreference:"default",
+    });
+  } catch(_) { return false; }
+  if(!renderer) return false;
+  renderer.setClearColor(0x000000,0);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.toneMapping=THREE.NoToneMapping;   // emissive hologram — don't crush it
+
+  scene=new THREE.Scene();
+  camera=new THREE.PerspectiveCamera(34,1,0.1,100);
+  camera.position.set(0,0,3.9);
+
+  // Subtle image-based light so the earth's base-colour map reads; the cyan shell
+  // is emissive and lights itself.
+  const pmrem=new THREE.PMREMGenerator(renderer);
+  scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
+
+  globeHolder=new THREE.Group();
+  scene.add(globeHolder);
+
+  new GLTFLoader().load("/globe.glb", gltf=>{
+    const model=gltf.scene;                    // globe sits at world origin (r≈0.64);
+    model.traverse(o=>{                         // the rays/beam hang below it.
+      if(!o.isMesh) return;
+      const m=o.material;
+      if(/transparent/i.test(m.name||"")) shellMat=m; else surfMat=m;
+    });
+    globeHolder.add(model);
+    // wide in the horizontal plane (x & z together → no wobble when spinning),
+    // a touch shorter vertically.
+    globeHolder.scale.set(1.45*1.32, 1.45*0.92, 1.45*1.32);
+
+    // Glowing white core: the earth texture has cyan land over a transparent
+    // ocean, so a bright sphere just inside the cage turns the "black ball" white
+    // while the continents/grid stay cyan on top.
+    const core=new THREE.Mesh(
+      new THREE.SphereGeometry(0.555,64,64),
+      new THREE.MeshBasicMaterial({ color:0xcfe6ff })
+    );
+    globeHolder.add(core);
+
+    if(gltf.animations && gltf.animations.length){
+      mixer=new THREE.AnimationMixer(model);
+      gltf.animations.forEach(c=>mixer.clipAction(c).play());
+    }
+  }, undefined, err=>{ console.warn("globe.glb load failed",err); });
+
   return true;
 }
 
 function resizeCanvas() {
-  const dpr=Math.min(devicePixelRatio||1,2);
-  const css=parseFloat(getComputedStyle(canvas).width)||180;
-  const px=Math.round(css*dpr);
-  if(canvas.width!==px){canvas.width=px;canvas.height=px;if(gl)gl.viewport(0,0,px,px);}
+  if(!renderer) return;
+  const w=canvas.clientWidth||parseFloat(getComputedStyle(canvas).width)||180;
+  const h=canvas.clientHeight||w;
+  renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  renderer.setSize(w,h,false);
+  camera.aspect=w/h; camera.updateProjectionMatrix();
 }
 
 // ── State params ──────────────────────────────────────────────────────────────
@@ -642,19 +729,26 @@ function draw(now) {
   canvas.style.transform=`scale(${totalScale.toFixed(4)})`;
 
   const[r,g,b]=cur.bRGB.map(v=>Math.round(v));
-  canvas.style.boxShadow=[
+  orbGlow.style.boxShadow=[
     `0 0 ${cur.bR.toFixed(1)}px ${(cur.bR*.28).toFixed(1)}px rgba(${r},${g},${b},${cur.bA.toFixed(3)})`,
     `0 0 ${cur.bfR.toFixed(1)}px ${(cur.bfR*.32).toFixed(1)}px rgba(${r},${g},${b},${cur.bfA.toFixed(3)})`,
   ].join(",");
 
-  if(!glReady)return;
+  if(!glReady||!renderer)return;
+  const dt=Math.min(_clock.getDelta(),0.05);
+  if(mixer)mixer.update(dt);
+  if(globeHolder){
+    // auto-rotate; spin faster when the daimon is active
+    globeHolder.rotation.y+=(0.18+cur.spd*1.7)*dt;
+  }
+  // Pulse the hologram shell's glow with the daimon's heartbeat — but keep its
+  // native cyan so it still reads as the model you made. State colour lives in
+  // the surrounding halo (orbGlow) instead.
   const pulse=Math.sin(t*2*Math.PI/(tgt.pulsePer/1000))*.5+.5;
-  gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.uniform1f(ub.u_t,t);gl.uniform2f(ub.u_res,canvas.width,canvas.height);
-  gl.uniform3fv(ub.u_c1,cur.c1);gl.uniform3fv(ub.u_c2,cur.c2);gl.uniform3fv(ub.u_cr,cur.cr);
-  gl.uniform1f(ub.u_turb,cur.turb);gl.uniform1f(ub.u_spd,cur.spd);
-  gl.uniform1f(ub.u_pulse,pulse);gl.uniform1f(ub.u_rim,cur.rim);
-  gl.drawArrays(gl.TRIANGLES,0,6);
+  if(shellMat){
+    shellMat.emissiveIntensity=1.7+pulse*0.6+cur.turb*0.7;
+  }
+  renderer.render(scene,camera);
 }
 
 // ── daimon API (exact contract) ───────────────────────────────────────────────
@@ -665,7 +759,7 @@ const daimon = {
     applyStateExtras(state);
     if(state==="idle")setTimeout(()=>{chipsEl.innerHTML="";},800);
   },
-  say(text)                 { _appendMsg(text,"msg-daimon"); },
+  say(text)                 { _appendMsg(text,"msg-daimon"); speakDaimon(text); },
   proposeAction(verb,risk)  {
     const c=document.createElement("div");
     c.className=`chip chip-${risk}`;
@@ -698,11 +792,16 @@ function connect() {
   ws.addEventListener("message",({data})=>{
     let msg; try{msg=JSON.parse(data);}catch{return;}
     switch(msg.type){
-      case "state":      daimon.setState(msg.state);              break;
+      case "state":
+        if(msg.state==="idle"){ serverBusy=false; _maybeResume(); }
+        else if(msg.state!=="listening"){ serverBusy=true; }
+        daimon.setState(msg.state);
+        break;
       case "say":        daimon.say(msg.text);                    break;
       case "action":     daimon.proposeAction(msg.verb,msg.risk); break;
       case "gate":       daimon.requestGate(msg.label);           break;
       case "gate_close": daimon.closeGate();                      break;
+      case "model":      if(msg.model)modelSelect.value=msg.model; break;
 
       case "term_open":
         _openTerm(msg.project||"");
@@ -747,6 +846,10 @@ function sendMessage() {
 }
 
 sendBtn.addEventListener("click",sendMessage);
+modelSelect.addEventListener("change",()=>{
+  if(ws && ws.readyState===WebSocket.OPEN)
+    ws.send(JSON.stringify({type:"set_model",model:modelSelect.value}));
+});
 inputEl.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}
 });
@@ -757,6 +860,109 @@ inputEl.addEventListener("input",()=>{_resizeInput();springNudge(0.008);});
 document.addEventListener("touchstart",e=>{
   if(!inputEl.contains(e.target)&&!sendBtn.contains(e.target))inputEl.blur();
 },{passive:true});
+
+// ── Voice: hands-free conversation (speech-to-text in, speech out) ────────────
+// Tap the mic to start a conversation. Daimon then keeps listening on its own:
+// you speak → it replies (aloud) → it listens again, no button presses. Tap the
+// mic again (or it auto-stops on permission denial) to end the conversation.
+const _SR    = window.SpeechRecognition || window.webkitSpeechRecognition;
+const _synth = window.speechSynthesis || null;
+let convoMode=false, recog=null, recogActive=false;
+let speaking=false, awaitingReply=false, serverBusy=false;
+let listenTimer=null, fallbackTimer=null;
+
+if(!_SR) micBtn.style.display="none";   // no speech recognition → hide the mic
+
+function _buildRecog(){
+  const r=new _SR();
+  r.lang="en-US"; r.interimResults=true; r.continuous=false; r.maxAlternatives=1;
+  r.onstart=()=>{ recogActive=true; if(convoMode&&!speaking)daimon.setState("listening"); };
+  r.onresult=(e)=>{
+    let interim="", final="";
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const res=e.results[i];
+      if(res.isFinal) final+=res[0].transcript; else interim+=res[0].transcript;
+    }
+    if(interim){ inputEl.value=interim; _resizeInput(); }
+    if(final.trim()){ inputEl.value=final.trim(); _resizeInput(); _onUtterance(); }
+  };
+  r.onerror=(e)=>{
+    recogActive=false;
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"){ stopConvo(); return; }
+    if(convoMode && !speaking && !awaitingReply) _scheduleListen(500);
+  };
+  r.onend=()=>{
+    recogActive=false;
+    if(convoMode && !speaking && !awaitingReply) _scheduleListen(250);
+  };
+  return r;
+}
+
+function _scheduleListen(d){ clearTimeout(listenTimer); listenTimer=setTimeout(_startListen,d||200); }
+function _startListen(){
+  if(!convoMode || speaking || recogActive) return;
+  try{ recog.start(); }catch(_){ /* start races with a pending stop — ignore */ }
+}
+function _stopListen(){ try{ recog && recog.abort(); }catch(_){} recogActive=false; }
+
+function _onUtterance(){
+  const text=inputEl.value.trim();
+  if(!text) return;
+  _stopListen();
+  awaitingReply=true; serverBusy=true;
+  clearTimeout(fallbackTimer);
+  fallbackTimer=setTimeout(()=>{ awaitingReply=false; if(convoMode&&!speaking)_scheduleListen(300); },14000);
+  sendMessage();                       // appends, sends, sets "thinking"
+}
+
+function _maybeResume(){
+  // Resume listening only once the server is done AND Daimon has finished talking.
+  if(convoMode && awaitingReply && !speaking && !serverBusy){
+    awaitingReply=false;
+    clearTimeout(fallbackTimer);
+    _scheduleListen(350);
+  }
+}
+
+function speakDaimon(text){
+  if(!convoMode || !_synth || !text) return;
+  _stopListen();                       // never let the mic hear Daimon's own voice
+  speaking=true;
+  daimon.setState("speaking");
+  const u=new SpeechSynthesisUtterance(String(text).slice(0,600));
+  u.lang="en-US"; u.rate=1.03; u.pitch=1.0;
+  u.onend=()=>{
+    if(_synth.speaking || _synth.pending) return;  // more queued — stay "speaking"
+    speaking=false;
+    _maybeResume();
+  };
+  try{ _synth.speak(u); }catch(_){ speaking=false; _maybeResume(); }
+}
+
+function startConvo(){
+  if(!_SR) return;
+  convoMode=true;
+  micBtn.classList.add("recording");
+  micBtn.setAttribute("aria-label","End conversation");
+  if(ws && ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify({type:"voice",on:true}));
+  if(_synth){ try{ _synth.cancel(); _synth.speak(new SpeechSynthesisUtterance("")); }catch(_){} } // unlock iOS audio
+  _scheduleListen(150);
+}
+function stopConvo(){
+  convoMode=false; awaitingReply=false; speaking=false;
+  micBtn.classList.remove("recording");
+  micBtn.setAttribute("aria-label","Start conversation");
+  clearTimeout(listenTimer); clearTimeout(fallbackTimer);
+  _stopListen();
+  if(_synth){ try{ _synth.cancel(); }catch(_){} }
+  if(ws && ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify({type:"voice",on:false}));
+  daimon.setState("idle");
+}
+
+if(_SR){
+  recog=_buildRecog();
+  micBtn.addEventListener("click",()=>{ convoMode ? stopConvo() : startConvo(); });
+}
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 resizeCanvas();
