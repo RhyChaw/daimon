@@ -116,8 +116,16 @@ def _sq(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
-def _open_in_claude_code(project: str, prompt: str | None = None, mode: str = "term") -> str:
+def _open_in_claude_code(project: str = "", prompt: str | None = None, mode: str = "term") -> str:
     name = str(project).strip()
+    # No project named (empty), or the model echoed "claude"/"claude code" as the
+    # project name — treat both as "which project?" and ask aloud.
+    if not name or name.lower() in {"claude", "claude code", "claudecode"}:
+        known = _projects.known_aliases()
+        known_str = ", ".join(known) if known else "none yet"
+        raise NeedsUserInput(
+            f"Which project should I open in Claude Code? Known projects: {known_str}."
+        )
     path = _projects.resolve(name)
     if path is None:
         known = _projects.known_aliases()
@@ -175,5 +183,5 @@ ACTION_SCHEMA = {
     "remember":       {"risk": "auto",    "args": ["key", "value"],          "handler": _remember,       "desc": "save a personal fact the user stated (e.g. prof → contact) for later recall"},
     "read_calendar":         {"risk": "auto",    "args": ["query"],                    "handler": _read_calendar,          "desc": "read today's remaining Calendar events", "optional_args": ["query"]},
     "get_weather":           {"risk": "auto",    "args": ["location"],                 "handler": _get_weather,             "desc": "current weather for location (optional; uses location fact if omitted)", "optional_args": ["location"]},
-    "open_in_claude_code":   {"risk": "auto",    "args": ["project", "prompt", "mode"], "handler": _open_in_claude_code,     "desc": "start an embedded Claude Code session in the daimon UI for a registered project; optional prompt sent as first message; mode='terminal' opens a Terminal window instead", "optional_args": ["prompt", "mode"]},
+    "open_in_claude_code":   {"risk": "auto",    "args": ["project", "prompt", "mode"], "handler": _open_in_claude_code,     "desc": "start an embedded Claude Code session in the daimon UI for a registered project; optional prompt sent as first message; mode='terminal' opens a Terminal window instead", "optional_args": ["project", "prompt", "mode"]},
 }
