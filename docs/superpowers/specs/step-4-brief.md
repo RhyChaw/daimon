@@ -1,9 +1,15 @@
 # Step 4 brief — the TTS sidecar
 
-**Start here.** Supersedes `step-3-brief.md`. Written for a fresh session with no
-prior context. Parent spec: `2026-08-02-daimon-hud-voice-and-claude-integration.md` §4.2.
+> **Superseded by [`step-7-brief.md`](step-7-brief.md).** Step 4 is committed and green
+> (78 tests). This file is kept as the record of what step 4 was scoped to and, more
+> importantly, as **the full measurement record** — the go/no-go numbers, the length
+> curve, the protocol MUSTs and the Phase C findings all live here in detail. The current
+> brief carries forward what step 7 needs; come back here for the evidence behind it.
 
-Steps 1–3 are committed and green (61 tests).
+Supersedes `step-3-brief.md`. Parent spec:
+`2026-08-02-daimon-hud-voice-and-claude-integration.md` §4.2.
+
+Steps 1–3 were committed and green (61 tests) when this was written.
 
 ## Read this first: step 4 fixes a regression, it is not a quality upgrade
 

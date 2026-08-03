@@ -1,9 +1,14 @@
 # Step 6 carry-forward — the chunk budget and the TTS router
 
-**This is not the entry point.** `step-4-brief.md` is. This file exists because the step-4
+> **The router half is superseded by [`step-6-decision.md`](step-6-decision.md).** There
+> is no hosted tier: a 729 ms warm median removed the reason for a second backend, so the
+> router collapses to one. This file is kept because **the chunk-budget analysis and the
+> path-spelling finding below are still live** and were never about routing.
+
+**This is not the entry point.** `step-7-brief.md` is. This file exists because the step-4
 measurement produced everything needed to tune the chunk budget, and that tuning is
 deliberately *not* step 4's job. Read the current entry-point brief first; come here when
-the budget or the router is actually being worked on.
+the budget or the splitter is actually being worked on.
 
 Parent spec: `2026-08-02-daimon-hud-voice-and-claude-integration.md` §4.2, §4.3.
 
