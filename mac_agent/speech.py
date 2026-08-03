@@ -15,6 +15,13 @@ _SAY_BIN = "/usr/bin/say"
 _QUEUE = queue.Queue()
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
+_MUTED = False
+
+
+def set_muted(value):
+    """Suppress macOS `say` output (e.g. while a browser client drives TTS)."""
+    global _MUTED
+    _MUTED = bool(value)
 
 
 def _run_say(text):
@@ -53,5 +60,7 @@ def _ensure_worker():
 
 def speak(text):
     """Queue text for speech; waits behind any in-progress utterance."""
+    if _MUTED:
+        return
     _ensure_worker()
     _QUEUE.put(text)

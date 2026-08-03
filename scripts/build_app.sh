@@ -21,6 +21,17 @@ if [[ ! -d "${APP}" ]]; then
   exit 1
 fi
 
+# py2app's package-data copier silently skips unknown binary extensions (e.g.
+# .glb model files), so sync the full web/ dir into the bundle to guarantee parity.
+echo "Syncing web/ assets into bundle …"
+BUNDLE_WEB="$(find "${APP}/Contents/Resources/lib" -type d -path '*/mac_agent/web' | head -1)"
+if [[ -n "${BUNDLE_WEB}" ]]; then
+  rsync -a --delete "${ROOT}/mac_agent/web/" "${BUNDLE_WEB}/"
+  echo "  → ${BUNDLE_WEB}"
+else
+  echo "  WARNING: could not locate mac_agent/web inside the bundle"
+fi
+
 echo "Clearing quarantine (so Finder can open the app) …"
 xattr -cr "${APP}" 2>/dev/null || true
 

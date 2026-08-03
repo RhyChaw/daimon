@@ -40,6 +40,7 @@ _MIME = {
     ".html": "text/html; charset=utf-8",
     ".js":   "application/javascript; charset=utf-8",
     ".css":  "text/css; charset=utf-8",
+    ".glb":  "model/gltf-binary",
 }
 
 
@@ -70,6 +71,13 @@ async def _ws_handler(websocket):
         except Exception:
             pass
 
+        # Tell the client which model backend is currently selected.
+        try:
+            from . import settings as _settings
+            await websocket.send(json.dumps({"type": "model", "model": _settings.get_backend()}))
+        except Exception:
+            pass
+
         async for raw in websocket:
             try:
                 msg = json.loads(raw)
@@ -95,8 +103,33 @@ async def _ws_handler(websocket):
                     _ts.resize(int(msg.get("cols", 80)), int(msg.get("rows", 24)))
                 except Exception:
                     pass
+            elif t == "set_model":
+                name = str(msg.get("model", "")).strip().lower()
+                if name in ("claude", "ollama"):
+                    try:
+                        from . import settings as _settings
+                        _settings.set_backend(name)
+                        # Echo to every client so all UIs reflect the change.
+                        broadcast({"type": "model", "model": name})
+                    except Exception:
+                        pass
+            elif t == "voice":
+                # Browser drives TTS during hands-free conversation — mute the
+                # Mac's `say` so audio isn't doubled.
+                try:
+                    from . import speech as _speech
+                    _speech.set_muted(bool(msg.get("on")))
+                except Exception:
+                    pass
     finally:
         _clients.discard(websocket)
+        # Don't leave the Mac voice muted if the controlling client drops.
+        if not _clients:
+            try:
+                from . import speech as _speech
+                _speech.set_muted(False)
+            except Exception:
+                pass
 
 
 async def _process_request(connection, request):
