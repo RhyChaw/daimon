@@ -58,14 +58,25 @@ class NeedsUserInput(Exception):
 
 
 class ToolResult:
-    """Handler return value: optional pre-built say text skips the LLM follow-up."""
+    """Handler return value.
 
-    __slots__ = ("data", "say", "ok")
+    `say` is pre-rendered system text — deterministic, written to be spoken.
+    `announce` decides whether it is spoken *now*.
 
-    def __init__(self, data, say=None, ok=True):
+    They are separate because the pre-rendered text has two futures. Speaking
+    it is plumbing. Answering *from* it without a model round-trip is a real
+    behaviour change on the highest-frequency tools, and is deliberately not
+    built yet — see docs/superpowers/specs/step-2-brief.md. Defaulting
+    `announce` to False means nothing starts speaking by accident.
+    """
+
+    __slots__ = ("data", "say", "ok", "announce")
+
+    def __init__(self, data, say=None, ok=True, announce=False):
         self.data = data
         self.say = say
         self.ok = ok
+        self.announce = announce
 
 
 def _fetch_json(url, timeout=30):

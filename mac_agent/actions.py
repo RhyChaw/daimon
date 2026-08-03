@@ -24,7 +24,7 @@ import urllib.parse
 from . import memory
 from .keystrokes import AccessibilityRequired, play_spotify_recent, play_spotify_search
 from .resources import script_path
-from .senses import NeedsUserInput, get_weather, read_calendar
+from .senses import NeedsUserInput, ToolResult, get_weather, read_calendar
 from .speech import speak as _speak_async
 from . import projects as _projects
 
@@ -45,7 +45,10 @@ def _open_app(app_name):
     if not app_name or "/" in app_name or app_name.startswith("-"):
         raise ValueError("invalid app name")
     subprocess.run(["open", "-a", app_name], check=True)
-    _speak_async(f"Opened {app_name}.")
+    # Hand the text upward instead of speaking it here. Speaking directly meant
+    # this path produced audio with no WS event and no audit row, which is a
+    # hole in the premise that every action lands in audit.jsonl.
+    return ToolResult(None, say=f"Opened {app_name}.", announce=True)
 
 
 _RECENT_PLAY_QUERIES = frozenset({"recent", "last", "latest", "again"})

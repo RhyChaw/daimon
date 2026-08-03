@@ -174,8 +174,17 @@ def _emit_say(text, origin):
 
 
 def _say(text):
+    """Speak a deterministic, Daimon-authored utterance.
+
+    Denials, gate prompts, step-cap messages, contact questions. These used to
+    speak on the Mac without ever reaching the event bus, so in the browser
+    they simply did not exist.
+    """
+    events.emit({"type": "state", "state": "speaking"})
+    _emit_say(text, "system")
     if not _music_played_this_turn:
         ACTION_SCHEMA["say"]["handler"](text=text)
+    log(action="say", args={"text": text}, decision="allowed", auth_method="auto", ok=True)
     print(f"  -> {text}")
 
 
@@ -185,6 +194,21 @@ def _music_say(text):
     events.emit({"type": "state", "state": "speaking"})
     _emit_say(text, "system")
     log(action="say", args={"text": text}, decision="allowed", auth_method="auto", ok=True)
+
+
+def _announce(task, action, text):
+    """Speak a tool's pre-rendered text, on the bus and in the audit log.
+
+    This is the (a) half of reviving ToolResult.say: the text is spoken, not
+    used to answer in place of the model. The model still runs its own step.
+    """
+    events.emit({"type": "state", "state": "speaking"})
+    _emit_say(text, "system")
+    if not _music_played_this_turn:
+        ACTION_SCHEMA["say"]["handler"](text=text)
+    log(action="say", args={"text": text}, decision="allowed", auth_method="auto", ok=True)
+    _episode(task, "success", "say", {"text": text}, f"announced {action}")
+    print(f"  -> {text}")
 
 
 def _ask_for_email(label):
@@ -648,6 +672,16 @@ def _execute_step(user_text, action, args):
     if isinstance(result, ToolResult):
         tool_data = result.data
         tool_ok = getattr(result, "ok", True)
+        if tool_ok and result.say and getattr(result, "announce", False):
+            _announce(user_text, action, result.say)
+        if not tool_data:
+            # Nothing for the model to read — keep the compact history line the
+            # non-ToolResult path produced, so the model's context is unchanged.
+            print("  ok")
+            log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=tool_ok)
+            _episode(user_text, "success" if tool_ok else "failure", action, args,
+                     _success_note(action, args))
+            return StepOutcome("continue", f"{action}({json.dumps(args, ensure_ascii=False)}) → ok")
         if tool_ok:
             print("  -> data received")
             log(action=action, args=args, decision="allowed", auth_method=auth_method, ok=True)

@@ -90,5 +90,63 @@ class SayPayloadTests(unittest.TestCase):
         self.assertEqual(seen[0]["origin"], "system")
 
 
+class ToolResultAnnounceTests(unittest.TestCase):
+    """ToolResult.say is pre-rendered system text; announce decides if it is spoken.
+
+    Two fields because the pre-rendered text has two futures. Speaking it is
+    step 2 plumbing (fork a). Answering *from* it without a model round-trip is
+    fork b, which is out of scope — see docs/superpowers/specs/step-2-brief.md.
+    Defaulting announce to False keeps read_calendar silent exactly as before,
+    so nothing starts speaking by accident.
+    """
+
+    def test_say_defaults_to_not_announcing(self):
+        from mac_agent.senses import ToolResult
+        self.assertFalse(ToolResult("data", say="text").announce)
+
+    def test_read_calendar_keeps_its_say_unspoken(self):
+        # The pre-rendered calendar speech is the fork-b hook. It must stay
+        # built and unspoken, or the answer is voiced twice: once here and
+        # again when the model produces its final say from the same data.
+        from mac_agent import senses
+        result = senses.ToolResult("Now: 15:00\n\n(nothing remaining today)",
+                                   say="It's 3:00 PM. Nothing left today.")
+        self.assertTrue(result.say)
+        self.assertFalse(result.announce)
+
+
+class OpenAppTests(unittest.TestCase):
+    """_open_app must not speak for itself — that path had no WS event and no
+    audit row, which is a hole in the premise that every action is logged."""
+
+    def test_open_app_returns_announceable_text_instead_of_speaking(self):
+        from mac_agent import actions
+        with patch("mac_agent.actions.subprocess.run") as run, \
+             patch("mac_agent.actions._speak_async") as spoken:
+            result = actions._open_app(app_name="Spotify")
+        run.assert_called_once()
+        spoken.assert_not_called()
+        self.assertEqual(result.say, "Opened Spotify.")
+        self.assertTrue(result.announce)
+
+
+class FastPathOriginTests(unittest.TestCase):
+    """Fast-path utterances reach both surfaces, tagged system."""
+
+    @patch("mac_agent.speech._ensure_worker", lambda: None)
+    def test_fast_path_say_emits_a_system_tagged_event(self):
+        seen = []
+        unsub = events.subscribe(seen.append)
+        try:
+            agent._say("Okay — I'll ignore laundry on your schedule.")
+        finally:
+            unsub()
+        says = [e for e in seen if e.get("type") == "say"]
+        self.assertEqual(len(says), 1)
+        self.assertEqual(says[0]["origin"], "system")
+        self.assertEqual(says[0]["text"],
+                         "Okay — I'll ignore laundry on your schedule.")
+
+
 if __name__ == "__main__":
     unittest.main()
