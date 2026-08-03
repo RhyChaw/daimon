@@ -10,6 +10,7 @@ the whitelist; this code is what actually runs anything. say ends the turn.
 
 import json
 import re
+import time
 
 from . import actions as actions_mod
 from .actions import ACTION_SCHEMA
@@ -21,6 +22,7 @@ from . import memory
 from . import episodic
 from . import palace_memory
 from . import clock
+from . import speech
 from .chunking import split_utterance
 from .senses import NeedsUserInput, ToolResult
 
@@ -787,6 +789,37 @@ def _build_prompt(user_text):
     return "\n\n".join(parts)
 
 
+def _await_speech():
+    """Block until this turn's audio has finished, then say so honestly.
+
+    Before this, `finally` emitted idle as soon as the text was *enqueued*, so
+    the server claimed to be idle while audio was still playing. Chunking made
+    that lie longer, not shorter.
+
+    Synchronous on purpose. Emitting idle from a waiter thread would decouple
+    state emission from handle() and give step 7 a second place where
+    completion is observed.
+
+    Accepted consequence: the REPL cannot accept the next turn until audio
+    finishes, so you can no longer type a second question over a long answer.
+    Queueing a question behind an unheard answer was the bug, not the feature;
+    the escape hatch is barge-in, which is step 7. Until then, Ctrl-C.
+
+    The wait is bounded because handle() blocking is the REPL thread not
+    reading its inbox: an unbounded wait would deadlock the whole agent with no
+    recovery path. A timeout is a bug signal, never routine — `say` is a local
+    binary that always terminates.
+    """
+    started = time.monotonic()
+    if speech.wait_idle(speech.DRAIN_TIMEOUT):
+        return
+    print(f"  [speech] WARNING: audio did not finish within "
+          f"{speech.DRAIN_TIMEOUT:.0f}s "
+          f"(waited {time.monotonic() - started:.1f}s, "
+          f"{speech.pending()} chunk(s) still pending) — "
+          f"emitting idle anyway")
+
+
 def handle(user_text, backend):
     global _music_played_this_turn
     user_text = _clean_input(user_text)
@@ -797,7 +830,12 @@ def handle(user_text, backend):
     try:
         _handle_inner(user_text, backend)
     finally:
+        # Reset before the wait: the flag is read at *enqueue* time only, and
+        # everything for this turn is already enqueued. Moving that read to
+        # dequeue time would make this reset a live bug — the second reason not
+        # to add a per-pop check to the worker.
         _music_played_this_turn = False
+        _await_speech()
         events.emit({"type": "state", "state": "idle"})
 
 

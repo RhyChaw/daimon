@@ -1,6 +1,6 @@
 # Step 3 brief — the playback layer
 
-**Start here.** Supersedes `step-2-brief.md`. Written for a fresh session with no
+**Superseded by `step-4-brief.md`.** Supersedes `step-2-brief.md`. Written for a fresh session with no
 prior context. Parent spec: `2026-08-02-daimon-hud-voice-and-claude-integration.md` §4.
 
 Steps 1 and 2 are committed and green. Step 3 is the heaviest piece of infrastructure
@@ -86,11 +86,20 @@ Announcing today: `_open_app` only.
    and in `finally`; `_execute_step` sets it `True` once on `play_music` success.
    Per-chunk suppression would let a chunk speak mid-turn and pause Spotify, which is the
    exact thing it exists to prevent.
-3. **Origin taxonomy is two values, by authorship not length.** `system` = deterministic
+3. **`_music_played_this_turn` is read at enqueue time only.** `_say`, `_announce`
+   and `_execute_step` all check it before calling the handler, never after. That is
+   what makes `handle()`'s `finally` safe to reset it while this turn's chunks are
+   still queued — everything for the turn is already enqueued by then. Move that read
+   to dequeue time and the reset becomes a live bug. **This is the second independent
+   reason not to add a per-pop `_MUTED` check to the worker**: the first is that a
+   second cancellation path has to be reconciled with step 7's epoch counter. Record
+   the pair together — a future session that sees only one of them will think the
+   other is free.
+4. **Origin taxonomy is two values, by authorship not length.** `system` = deterministic
    and pre-rendered; `prose` = model-generated. The step-6 router keys on origin *and*
    length, so origin need not encode "short". If something fits neither, **ask** — do not
    grow the enum.
-4. **The WS say payload is a contract.** `{type, text, chunks, origin}`. `text` is the
+5. **The WS say payload is a contract.** `{type, text, chunks, origin}`. `text` is the
    whole utterance for the transcript; `chunks` is what gets spoken. The browser must
    never re-implement the splitter and must never truncate — it used to cut at 600 chars.
 

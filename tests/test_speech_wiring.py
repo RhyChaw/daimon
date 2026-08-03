@@ -14,12 +14,21 @@ from mac_agent import agent, events, speech
 
 
 def _drain(q):
+    """Pop every queued chunk, returning the text of each.
+
+    Each item is released through the same accounting path the worker uses, so
+    speech.pending() stays honest. A dedicated reset hook would be a second way
+    to reach the same state, and would hide exactly the class of drift the
+    accounting exists to catch.
+    """
     out = []
     while True:
         try:
-            out.append(q.get_nowait())
+            item = q.get_nowait()
         except queue.Empty:
             return out
+        out.append(item.text)
+        item._release()
 
 
 class SpeechQueueTests(unittest.TestCase):
@@ -132,6 +141,11 @@ class OpenAppTests(unittest.TestCase):
 
 class FastPathOriginTests(unittest.TestCase):
     """Fast-path utterances reach both surfaces, tagged system."""
+
+    def tearDown(self):
+        # _say enqueues; without draining, speech.pending() leaks into any
+        # later test that waits on it.
+        _drain(speech._QUEUE)
 
     @patch("mac_agent.speech._ensure_worker", lambda: None)
     def test_fast_path_say_emits_a_system_tagged_event(self):

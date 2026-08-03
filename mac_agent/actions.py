@@ -30,7 +30,10 @@ from . import projects as _projects
 
 
 def _say(text):
-    _speak_async(text)
+    # Returns the Utterance handle. No caller uses it yet — the callers arrive
+    # with step 7's cancellation policy — but returning it keeps the handle
+    # reachable from the action layer rather than swallowed here.
+    return _speak_async(text)
 
 
 def _open_url(url):
