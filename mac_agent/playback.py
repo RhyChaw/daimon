@@ -26,7 +26,10 @@ process does not go away, which in measurement it always did within ~4 ms.
 """
 
 import atexit
+import itertools
+import json
 import os
+import socket
 import subprocess
 import tempfile
 import threading
@@ -168,6 +171,305 @@ class SayPlayer:
                 pass
             raise
         return SayHandle(proc, path)
+
+
+class SidecarUnavailable(Exception):
+    """The Kokoro sidecar cannot take this chunk. Fall back to `say`.
+
+    Raised for every reason the sidecar might not serve a request: not warm
+    yet, process gone, socket refused, protocol error, or busy. The caller
+    treats them identically because the remedy is identical.
+    """
+
+
+# The sidecar acknowledges stop in 2-6 ms measured mid-playback, so this is two
+# orders of magnitude of slack before we treat it as wedged. Unlike
+# SayHandle.stop(), which can always fall back to SIGKILL, a socket stop has no
+# floor of its own -- so escalation is explicit: no ack -> close socket -> kill.
+_SIDECAR_STOP_GRACE = 0.5
+_SIDECAR_ACK_TIMEOUT = 2.0
+
+
+class KokoroHandle:
+    """A handle to one chunk in flight inside the sidecar.
+
+    Owns one socket, the way SayHandle owns one process. That is deliberate:
+    stop() is called from a thread that is not the one blocked in wait(), so a
+    single half-duplex connection shared by both would make the writer contend
+    with a blocked reader. Sockets are full-duplex, so one connection per chunk
+    lets stop() send while the reader thread sits in recv.
+    """
+
+    __slots__ = ("_sock", "_rf", "_req_id", "_done", "_lock", "_closed",
+                 "_send_lock", "_on_wedged", "_stop_ack", "cancelled")
+
+    def __init__(self, sock, rf, req_id, on_wedged):
+        self._sock = sock
+        self._rf = rf
+        self._req_id = req_id
+        self._on_wedged = on_wedged
+        self._done = threading.Event()
+        self._stop_ack = threading.Event()
+        self._lock = threading.Lock()
+        self._send_lock = threading.Lock()
+        self._closed = False
+        self.cancelled = False
+        threading.Thread(target=self._read, name="daimon-tts-rx",
+                         daemon=True).start()
+
+    def _read(self):
+        try:
+            for line in self._rf:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                event = msg.get("ev")
+                if event == "stopped":
+                    # Audio has already ceased: the sidecar aborts the stream
+                    # synchronously before replying. `done` follows once the
+                    # speak thread notices, which may be much later.
+                    self._stop_ack.set()
+                elif event == "done":
+                    self.cancelled = bool(msg.get("cancelled"))
+                    # `done` settles the stop question too. Without this,
+                    # stop() blocks its full grace waiting for a `stopped`
+                    # frame that is already moot -- measured 502 ms against a
+                    # 150 ms bar when `done` had landed at ~50 ms.
+                    self._stop_ack.set()
+                    break
+        except OSError:
+            pass
+        finally:
+            # Setting the event in `finally` is what makes a dead sidecar
+            # surface as "finished" rather than as a worker thread wedged
+            # forever in wait(). The chunk is lost either way; hanging the
+            # agent as well is strictly worse.
+            self._done.set()
+            # This thread OWNS _rf and is the only one allowed to close it --
+            # see _close().
+            for closer in (self._rf.close, self._sock.close):
+                try:
+                    closer()
+                except OSError:
+                    pass
+
+    def _send(self, obj):
+        with self._send_lock:
+            self._sock.sendall((json.dumps(obj) + "\n").encode())
+
+    def _close(self):
+        """Unblock the reader from another thread, without deadlocking on it.
+
+        Do NOT close self._rf here. A BufferedReader's close() acquires the
+        same lock its blocked readline() already holds, so closing it from the
+        stopping thread while the reader sits in recv deadlocks both -- which
+        is exactly the hang stop()'s bounded escalation exists to prevent,
+        reintroduced one level down. Reproduced: the test suite wedged
+        indefinitely until this became a shutdown().
+
+        shutdown() needs no such lock: it makes the in-flight recv return EOF,
+        the reader's `finally` runs, and the reader closes what it owns.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass          # already closed, or peer gone
+
+    @property
+    def done(self):
+        return self._done.is_set()
+
+    def wait(self, timeout=None):
+        return self._done.wait(timeout)
+
+    def stop(self):
+        """Idempotent, safe from any thread, and bounded.
+
+        Bounded is the part that does not come for free. SayHandle.stop() can
+        always escalate to SIGKILL; a socket stop that waits on a wedged
+        sidecar would hang on the WS thread in step 7.
+        """
+        if self._done.is_set():
+            self._close()
+            return
+        try:
+            self._send({"cmd": "stop", "id": self._req_id})
+        except OSError:
+            self._done.set()
+            self._close()
+            return
+        # Wait for the ACKNOWLEDGEMENT, not for completion. The sidecar aborts
+        # the output stream before replying `stopped`, so once that lands the
+        # audio has already ceased -- which is what stop() promises. `done`
+        # arrives later, whenever the speak thread next checks.
+        #
+        # Waiting for `done` here instead was wrong and measurably so: a stop
+        # sent during synthesis cannot be answered until synthesis finishes
+        # (~600 ms for a short sentence), which blew the grace every time and
+        # escalated into killing a perfectly healthy sidecar.
+        if self._stop_ack.wait(_SIDECAR_STOP_GRACE) or self._done.is_set():
+            return
+        # No acknowledgement at all. Closing the socket unblocks our reader,
+        # whose `finally` sets the event; then take the process down so the
+        # next play() falls back to `say` instead of hanging again.
+        self._close()
+        self._done.set()
+        if self._on_wedged is not None:
+            self._on_wedged()
+
+
+class KokoroPlayer:
+    """The Kokoro sidecar, behind the same play/wait/stop/done interface.
+
+    Nothing above this line knows a socket exists. `play()` raises
+    SidecarUnavailable when it cannot serve the chunk; selecting a backend on
+    that signal is FallbackPlayer's job and happens inside play(), never by
+    re-entering speech.speak() -- see the note there.
+    """
+
+    name = "kokoro"
+
+    def __init__(self, socket_path, python_bin, script_path, voice=None,
+                 device=None):
+        self._socket_path = socket_path
+        self._python_bin = python_bin
+        self._script_path = script_path
+        self._voice = voice
+        self._device = device
+        self._proc = None
+        self._ready = threading.Event()
+        self._lock = threading.Lock()
+        self._next_id = itertools.count(1)
+
+    @property
+    def ready(self):
+        """Non-blocking. Readiness is a state, not a race resolved by timeout."""
+        return (self._ready.is_set() and self._proc is not None
+                and self._proc.poll() is None)
+
+    def start(self):
+        """Launch the sidecar eagerly, at agent startup.
+
+        Cold start is 6.56 s measured -- longer than most turns. Starting on
+        first speak() would put that in front of the first utterance; starting
+        here means the first seconds after launch use `say` and the voice
+        changes once, observably, when `ready` flips.
+        """
+        with self._lock:
+            if self._proc is not None:
+                return
+            cmd = [self._python_bin, self._script_path,
+                   "--socket", self._socket_path]
+            if self._voice:
+                cmd += ["--voice", self._voice]
+            if self._device:
+                cmd += ["--device", self._device]
+            try:
+                self._proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True)
+            except OSError:
+                self._proc = None
+                return
+        threading.Thread(target=self._await_ready, name="daimon-tts-ready",
+                         daemon=True).start()
+
+    def _await_ready(self):
+        proc = self._proc
+        try:
+            for line in proc.stdout:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue          # library banners on stdout; ignore
+                if msg.get("ev") == "ready":
+                    self._ready.set()
+                    return
+        except (OSError, ValueError):
+            pass
+        # stdout closed without ready: the sidecar failed to start. Most likely
+        # the espeak check refused, which is the intended behaviour -- running
+        # with unk='' would silently drop words. Stay unready; play() falls back.
+
+    def shutdown(self):
+        with self._lock:
+            proc, self._proc = self._proc, None
+        self._ready.clear()
+        if proc is None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=_STOP_GRACE)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def play(self, text):
+        if not self.ready:
+            raise SidecarUnavailable("sidecar not ready")
+        req_id = next(self._next_id)
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(_SIDECAR_ACK_TIMEOUT)
+            sock.connect(self._socket_path)
+            sock.sendall(
+                (json.dumps({"cmd": "speak", "id": req_id, "text": text})
+                 + "\n").encode())
+            rf = sock.makefile("r", encoding="utf-8")
+            ack = json.loads(rf.readline() or "{}")
+        except (OSError, ValueError) as exc:
+            raise SidecarUnavailable(f"sidecar speak failed: {exc}") from exc
+
+        if ack.get("ev") != "ack":
+            # "busy" lands here. The speech worker serialises, so a second
+            # concurrent speak means an assumption broke -- speak this chunk
+            # through `say` rather than dropping it, and let the sidecar's
+            # refusal stay loud rather than being absorbed by a queue.
+            try:
+                sock.close()
+            except OSError:
+                pass
+            raise SidecarUnavailable(f"sidecar refused: {ack.get('ev')!r}")
+
+        sock.settimeout(None)          # reader thread blocks; ack window is over
+        return KokoroHandle(sock, rf, req_id, self.shutdown)
+
+
+class FallbackPlayer:
+    """Selects a backend per chunk. THIS is where fallback belongs.
+
+    The tempting alternative -- catching SidecarUnavailable somewhere and
+    calling speech.speak() again -- is a trap. That call happens on the speech
+    worker thread, which is not the pending set's producer, so the one-producer
+    guard raises RuntimeError; _run_one's `except Exception: pass` swallows it;
+    the chunk is silently dropped and the accounting still balances, so nothing
+    looks wrong. Backend selection stays here, inside play().
+    """
+
+    def __init__(self, primary, fallback):
+        self._primary = primary
+        self._fallback = fallback
+
+    @property
+    def name(self):
+        return (self._primary.name if getattr(self._primary, "ready", False)
+                else self._fallback.name)
+
+    def play(self, text):
+        try:
+            return self._primary.play(text)
+        except SidecarUnavailable:
+            return self._fallback.play(text)
 
 
 class FinishedHandle:

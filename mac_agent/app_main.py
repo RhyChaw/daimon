@@ -79,6 +79,12 @@ def main():
     _configure_app_paths()
     load_dotenv()
     _check_accessibility()
+
+    # Eager, same reasoning as cli.py: ~6.6 s cold start must not land in front
+    # of the first utterance. Silent no-op when the sidecar venv is absent.
+    from mac_agent import speech
+    speech.start_sidecar()
+
     from mac_agent.console_ui import run_console
 
     run_console(_repl_with_input)

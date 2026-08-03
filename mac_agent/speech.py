@@ -39,17 +39,62 @@ whoever speaks next, so sequential use from different threads is fine. Only
 genuine concurrency trips it, which is the harmful case.
 """
 
+import os
 import queue
 import threading
 
 from .chunking import split_utterance
-from .playback import FinishedHandle, SayPlayer
+from .playback import FallbackPlayer, FinishedHandle, KokoroPlayer, SayPlayer
 
 _QUEUE = queue.Queue()
 _WORKER_LOCK = threading.Lock()
 _WORKER_STARTED = False
 _MUTED = False
-_PLAYER = SayPlayer()
+_SAY_PLAYER = SayPlayer()
+_SIDECAR = None
+_PLAYER = _SAY_PLAYER
+
+# The sidecar lives OUTSIDE the app bundle, in its own venv, because
+# `pip install kokoro` would change pyproject.toml and trigger the rebuild that
+# silently drops the macOS Accessibility grant. Python 3.12 specifically: 3.13
+# has no cp313 wheel for spaCy's `blis` and its source build dies in Cython.
+_DEFAULT_TTS_PYTHON = "~/.daimon/tts-venv/bin/python"
+_DEFAULT_TTS_SOCKET = "~/.daimon/tts.sock"
+
+
+def start_sidecar(python_bin=None, socket_path=None, voice=None, device=None):
+    """Launch the Kokoro sidecar eagerly and route playback through it.
+
+    Called at agent startup, not on first speak(). Cold start is 6.56 s
+    measured — longer than most turns — so putting it in front of the first
+    utterance would be the failure users notice most. Instead the first seconds
+    after launch use `say` and the voice changes once, observably, when the
+    sidecar reports ready.
+
+    Degrades silently when the sidecar venv is absent, following the
+    palace_memory.py precedent: no sidecar, no error, just `say`.
+    """
+    global _SIDECAR, _PLAYER
+    python_bin = os.path.expanduser(
+        python_bin or os.environ.get("DAIMON_TTS_PYTHON") or _DEFAULT_TTS_PYTHON)
+    socket_path = os.path.expanduser(
+        socket_path or os.environ.get("DAIMON_TTS_SOCKET") or _DEFAULT_TTS_SOCKET)
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "scripts", "tts_sidecar.py")
+    if not os.path.exists(python_bin) or not os.path.exists(script_path):
+        return None
+    sidecar = KokoroPlayer(socket_path, python_bin, script_path,
+                           voice=voice or os.environ.get("DAIMON_TTS_VOICE"),
+                           device=device or os.environ.get("DAIMON_TTS_DEVICE"))
+    sidecar.start()
+    _SIDECAR = sidecar
+    _PLAYER = FallbackPlayer(sidecar, _SAY_PLAYER)
+    return sidecar
+
+
+def sidecar_ready():
+    """Whether the sidecar is warm. Observable state, not a timeout race."""
+    return bool(_SIDECAR is not None and _SIDECAR.ready)
 
 # Chunks queued or in flight, guarded by _PENDING_CV. This is what wait_idle()
 # blocks on and what handle() reports when it times out.
@@ -60,12 +105,27 @@ _PENDING_CV = threading.Condition()
 # invariant in speak(); see the module docstring.
 _PRODUCER = None
 
-# The ceiling on how long handle() will wait for audio before giving up and
-# emitting idle anyway. Generous on purpose: `say` is a local binary that always
-# terminates, so a timeout here is a bug signal rather than normal operation.
-# Step 4 should lower it with evidence — a sidecar behind a unix socket can
-# plausibly hang, and 120 s of wedged agent is a long time.
-DRAIN_TIMEOUT = 120.0
+# The ceiling on how long handle() will wait for a whole utterance's audio
+# before giving up and emitting idle anyway.
+#
+# Lowered from 120 s with the step-4 measurement, as that value's comment
+# anticipated. Predicted wall time per utterance from the measured constants
+# (527 ms + 7.36 ms/char synthesis, 54.8 ms/char of audio, 494 ms drain margin)
+# over the 97-utterance corpus: median 3.5 s, p90 7.0 s, max 73.2 s. That max is
+# a real 22-chunk calendar listing, so the bound has to clear it; 90 s gives it
+# ~23% headroom. Anything lower would cut off a legitimate long utterance, which
+# is why this did not drop further.
+DRAIN_TIMEOUT = 90.0
+
+# The ceiling on a SINGLE chunk. This is the one that did not exist before.
+#
+# `handle.wait()` was called with no timeout, which is safe for `say` — a local
+# binary that always terminates — and unsafe for a socket, where an unresponsive
+# sidecar wedges the speech worker forever and DRAIN_TIMEOUT is the only
+# backstop. Worst legitimate chunk measured was 20.3 s end to end (a 133-char
+# filesystem path that Kokoro spells out character by character); 45 s is over
+# twice that and still bounded.
+CHUNK_TIMEOUT = 45.0
 
 
 def set_muted(value):
@@ -155,7 +215,11 @@ class Utterance:
             handle.stop()
             return
 
-        handle.wait()
+        if not handle.wait(CHUNK_TIMEOUT):
+            # A socket peer can hang where a `say` process could not. Give the
+            # chunk up rather than wedging the worker thread forever; stop() is
+            # itself bounded, so this cannot trade one hang for another.
+            handle.stop()
         with self._lock:
             if self._current is handle:
                 self._current = None
@@ -267,5 +331,6 @@ def speak(text):
     return utterance
 
 
-__all__ = ["DRAIN_TIMEOUT", "FinishedHandle", "Utterance", "pending",
-           "set_muted", "speak", "wait_idle"]
+__all__ = ["CHUNK_TIMEOUT", "DRAIN_TIMEOUT", "FinishedHandle", "Utterance",
+           "pending", "set_muted", "sidecar_ready", "speak", "start_sidecar",
+           "wait_idle"]

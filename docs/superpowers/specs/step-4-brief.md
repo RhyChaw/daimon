@@ -497,6 +497,53 @@ utterance length?**
 protocol MUST 2 holds today; trimming blindly is the fastest way to turn a satisfied
 invariant into a violated one.
 
+### Phase C — what the build found, 2026-08-03
+
+Three bugs the socketpair unit tests could not have caught, all found by driving the real
+sidecar. Recorded because each one is the *natural* way to write the code.
+
+**1. `serve()` must run `speak` off the connection's read loop.** Speaking inline blocks
+that connection for the whole utterance, so the `{"cmd":"stop"}` arriving mid-playback is
+never read. The player then burns its stop grace, escalates, and **kills a perfectly
+healthy sidecar**. Measured 614 ms against a 150 ms bar before the fix; 2–6 ms after.
+
+**2. `stop()` waits for the ACK, not for completion — protocol MUST 8.** The sidecar
+aborts the output stream *before* replying `stopped`, so that reply means audio has
+already ceased, which is exactly what `stop()` promises. `done` cannot arrive until the
+speak thread next checks, and during synthesis that is ~600 ms away. Waiting for `done`
+blew a 500 ms grace **every time a stop landed during synthesis** and escalated into
+shutting down a working process. `done` must also set the stop-ack, or `stop()` blocks its
+full grace waiting for a `stopped` frame that is already moot — measured 502 ms when
+`done` had landed at ~50 ms.
+
+**3. `KokoroHandle._close()` must `shutdown()` the socket, never close the reader.**
+`io.BufferedReader.close()` acquires the same lock its blocked `readline()` holds, so
+closing it from the stopping thread deadlocks both — the bounded-stop hang reintroduced
+one level down. Reproduced: the test suite wedged indefinitely. `shutdown()` needs no
+lock; it makes the in-flight recv return EOF and the reader closes what it owns.
+
+Post-fix, against the real sidecar: mid-playback `stop()` **2–7 ms**, mid-synthesis
+**139–146 ms** (bounded by synthesis finishing; no audio is produced at all), sidecar
+healthy across every trial, `cancelled=True` reported correctly.
+
+### The trailing silence is FIXED-LENGTH — measured, decision still open
+
+Answering the Phase C question directly, over 145 warm chunks:
+
+- vs chunk length: **494 ms fixed + 0.050 ms/char** — the per-char term is noise
+- vs audio duration: **492 ms fixed + 1.5 ms per second of audio** — likewise
+- stdev 30 ms; medians flat across every size bucket (485–504 ms)
+
+**It does not scale.** By the rule agreed before measuring, trimming it in the sidecar is
+therefore justified, and would remove N × ~450 ms of the agent sitting in `wait_idle`
+after audio is functionally over — on a 22-chunk utterance, ~10 s.
+
+**Not implemented, deliberately.** The margin being in the safe direction is the only
+reason MUST 2 holds today; trimming shrinks it to roughly `stream.latency`. That is a
+change to the invariant flagged as most fragile, so it needs its own loopback
+re-verification rather than riding along with the engine swap — the same one-variable
+argument that kept `MAX_CHARS` at 120.
+
 ### Step 4 must-do list
 
 - **`handle.wait()` at `speech.py:158` has no timeout.** Safe for `say` — a local binary

@@ -20,6 +20,12 @@ def main():
         print(message)
         return
 
+    # Eager, before the REPL takes a turn. Cold start is ~6.6 s; starting on
+    # first speak() would put that in front of the first utterance. Degrades
+    # silently to `say` when the sidecar venv is absent.
+    from . import speech
+    speech.start_sidecar()
+
     from . import ws_server
     from .resources import web_dir
     ws_server.start(web_dir=Path(web_dir()))
