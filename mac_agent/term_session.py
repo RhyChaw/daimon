@@ -8,9 +8,11 @@ WS clients send keystrokes as plain strings; resize events adjust TIOCSWINSZ.
 
 import base64
 import fcntl
+import json
 import os
 import resource
 import select
+import shlex
 import struct
 import termios
 import threading
@@ -31,6 +33,20 @@ def _set_winsize(fd: int, cols: int, rows: int) -> None:
         pass
 
 
+# ── Suppressing Claude Code's own chrome ─────────────────────────────────────
+# This PTY is a surface inside Daimon's UI, not a terminal window. Claude Code's
+# status line and update banner are another product's chrome showing through, and
+# they are the main reason the panel reads as an embedded iframe.
+#
+# Both suppressions are scoped to this spawn only — they are process arguments
+# and process environment, never written to ~/.claude/settings.json. The user's
+# own terminal keeps whatever statusLine and updater behaviour they configured.
+#
+# statusLine is overridden rather than removed: `true` exits 0 with no output, so
+# Claude Code renders an empty status line instead of the user's command.
+_QUIET_SETTINGS = json.dumps({"statusLine": {"type": "command", "command": "true"}})
+
+
 # ── Build environment with expanded PATH ─────────────────────────────────────
 def _child_env() -> dict:
     env = dict(os.environ)
@@ -38,6 +54,9 @@ def _child_env() -> dict:
     env["HOME"] = home
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
+    # Silences "Update available! Run: brew upgrade claude-code" inside the panel.
+    # Scoped to this child: it does not stop the user updating Claude Code normally.
+    env["DISABLE_AUTOUPDATER"] = "1"
     # Prepend common locations where `claude` may be installed.
     extras = [
         f"{home}/.claude/local",
@@ -66,7 +85,9 @@ class TermSession:
         env = _child_env()
         # Use login shell so PATH and nvm/etc. are configured; exec replaces it
         # with claude so the PTY shows the claude session directly.
-        cmd = ["zsh", "-l", "-c", "exec claude"]
+        # The settings JSON is shell-quoted: zsh -c re-parses this string, and an
+        # unquoted payload loses its double quotes and reaches claude as a path.
+        cmd = ["zsh", "-l", "-c", f"exec claude --settings {shlex.quote(_QUIET_SETTINGS)}"]
 
         self.pid, self.fd = pty.fork()
 
