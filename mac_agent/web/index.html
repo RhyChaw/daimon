@@ -306,47 +306,30 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 .msg-user { color: var(--text-dim); text-align: right; font-size: 13px; font-weight: 300; }
 .msg-daimon { color: rgba(215,225,255,0.88); font-weight: 300; }
 
-/* ── Terminal panel ─────────────────────────────────────────────────────── */
+/* ── Terminal ───────────────────────────────────────────────────────────── */
+/* Deliberately not a card: no border, no header bar, no fill. Terminal output
+   sits directly on the page background, so the session reads as part of Daimon
+   rather than as another product embedded in a window. The panel's own fill is
+   only half of that — _TERM_THEME.background carries the rest, and is
+   transparent for the same reason. */
 #term-panel {
   width: 100%; max-width: 900px;
   flex: 0 0 0px; overflow: hidden;
   display: flex; flex-direction: column;
-  background: rgba(3,3,12,0.98);
-  border-top: 1px solid rgba(255,255,255,0.055);
   z-index: 2;
   transition: flex-basis 0.35s ease;
 }
 #term-panel.visible { flex: 1 1 0; min-height: 200px; }
 
-#term-header {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 14px 6px;
-  background: rgba(255,255,255,0.022);
-  border-bottom: 1px solid rgba(255,255,255,0.042);
-  flex-shrink: 0; user-select: none;
-}
-#term-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: rgba(55,210,100,0.85);
-  box-shadow: 0 0 6px rgba(55,210,100,0.55);
-  flex-shrink: 0; transition: background 0.4s, box-shadow 0.4s;
-}
-#term-dot.dead { background: rgba(200,50,50,0.5); box-shadow: none; }
-#term-title {
-  font-family: var(--font-display); font-size: 10px; font-weight: 700;
-  letter-spacing: 0.18em; text-transform: uppercase;
-  color: rgba(170,180,225,0.45); flex: 1;
-}
-#term-close {
-  background: none; border: none; padding: 0 2px;
-  color: rgba(170,180,225,0.28); font-size: 18px; line-height: 1;
-  cursor: pointer; transition: color 0.2s; -webkit-tap-highlight-color: transparent;
-}
-#term-close:hover { color: rgba(255,90,90,0.65); }
-
+/* The mask belongs on the container, not .xterm-viewport: the viewport is the
+   scroller, so a mask there would travel with the content instead of holding
+   the fade at the top edge. Output fades in as it scrolls rather than being
+   cut off by a hard line. */
 #term-container {
   flex: 1; overflow: hidden;
   padding: 4px 6px 2px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 32px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 32px);
 }
 /* xterm.js overrides */
 #term-container .xterm { height: 100%; }
@@ -446,13 +429,8 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
   <div id="chips"></div>
 </div>
 
-<!-- Terminal panel (hidden until term_open) -->
+<!-- Terminal (hidden until term_open; no chrome — see #term-panel) -->
 <div id="term-panel">
-  <div id="term-header">
-    <div id="term-dot"></div>
-    <span id="term-title">Claude Code</span>
-    <button id="term-close" aria-label="Close">×</button>
-  </div>
   <div id="term-container"></div>
 </div>
 
@@ -515,9 +493,6 @@ const orbOuter      = document.getElementById("orb-outer");
 const orbGlow       = document.getElementById("orb-glow");
 const modelSelect   = document.getElementById("model-select");
 const termPanelEl   = document.getElementById("term-panel");
-const termDot       = document.getElementById("term-dot");
-const termTitleEl   = document.getElementById("term-title");
-const termCloseBtn  = document.getElementById("term-close");
 const termContainer = document.getElementById("term-container");
 
 // ── xterm.js (lazy — never crashes the orb if CDN is slow/unreachable) ────────
@@ -527,10 +502,14 @@ let termMounted = false;
 let termActivityTimer = null;
 
 const _TERM_THEME = {
-  background:          "#030310",
+  // Transparent, not near-black: xterm paints this behind every row, so an
+  // opaque value here is a rectangle of slightly-wrong black over the page
+  // background — the thing that still reads as "embedded window" after the
+  // panel's own fill is gone. allowTransparency below is what makes it work.
+  background:          "rgba(0,0,0,0)",
   foreground:          "#d2d8f0",
   cursor:              "#7799ff",
-  cursorAccent:        "#030310",
+  cursorAccent:        "#030308",
   selectionBackground: "rgba(95,135,255,0.22)",
   black:   "#1a1a2e", red:     "#ff6b6b", green:   "#4ecdc4", yellow:  "#ffe66d",
   blue:    "#6c8ebf", magenta: "#c792ea", cyan:    "#89ddff", white:   "#d2d8f0",
@@ -579,12 +558,10 @@ function _sendResize() {
     }));
 }
 
-function _openTerm(project) {
+function _openTerm() {
   _mountTerm();
   document.body.classList.add("term-active");
   termPanelEl.classList.add("visible");
-  termDot.classList.remove("dead");
-  termTitleEl.textContent = "Claude Code" + (project ? " · " + project : "");
   setTimeout(() => {
     if (fitAddon) try { fitAddon.fit(); } catch(_) {}
     _sendResize();
@@ -592,18 +569,13 @@ function _openTerm(project) {
   }, 380);
 }
 
+// The terminal is permanent now — no close affordance, and a dead session shows
+// as state rather than by the panel vanishing. So this only stops the activity
+// timer and drops the orb to idle; the panel itself stays where it is.
 function _closeTerm() {
-  termDot.classList.add("dead");
   clearTimeout(termActivityTimer);
   daimon.setState("idle");
 }
-
-termCloseBtn.addEventListener("click", () => {
-  termPanelEl.classList.remove("visible");
-  document.body.classList.remove("term-active");
-  setTimeout(resizeCanvas, 380);
-  daimon.setState("idle");
-});
 
 // ── three.js globe (the holographic earth GLB) ────────────────────────────────
 // The model is a self-illuminated hologram: an emissive earth surface plus a
@@ -795,14 +767,14 @@ function connect() {
       case "model":      if(msg.model)modelSelect.value=msg.model; break;
 
       case "term_open":
-        _openTerm(msg.project||"");
+        _openTerm();
         daimon.setState("acting");
         break;
 
       case "term":
         if(msg.data){
           // Auto-open panel if server sends data without explicit term_open (reconnect)
-          if(!termPanelEl.classList.contains("visible"))_openTerm("");
+          if(!termPanelEl.classList.contains("visible"))_openTerm();
           if(term) term.write(Uint8Array.from(atob(msg.data), c=>c.charCodeAt(0)));
           // Orb reacts to activity: acting while output flows, listening when quiet
           daimon.setState("acting");
