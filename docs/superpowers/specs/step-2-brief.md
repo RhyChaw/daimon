@@ -1,5 +1,9 @@
 # Step 2 brief — origin tagging, ToolResult.say, the _open_app audit hole
 
+> **Superseded by [`step-3-brief.md`](step-3-brief.md).** Step 2 is committed. This
+> file is kept as the record of what step 2 was scoped to; the current brief carries
+> the fork, the invariants and the packaging constraint forward.
+
 Recovery point. If the working session was summarized, start here, not from memory.
 
 Parent spec: `2026-08-02-daimon-hud-voice-and-claude-integration.md` §4.
