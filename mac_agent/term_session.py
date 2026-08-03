@@ -14,6 +14,7 @@ import resource
 import select
 import shlex
 import struct
+import subprocess
 import termios
 import threading
 from pathlib import Path
@@ -45,6 +46,51 @@ def _set_winsize(fd: int, cols: int, rows: int) -> None:
 # statusLine is overridden rather than removed: `true` exits 0 with no output, so
 # Claude Code renders an empty status line instead of the user's command.
 _QUIET_SETTINGS = json.dumps({"statusLine": {"type": "command", "command": "true"}})
+
+
+# ── Which Claude Code binary ─────────────────────────────────────────────────
+# Pinned to an absolute path rather than resolved from PATH. `zsh -l` re-sources
+# .zprofile, whose `brew shellenv` prepends /opt/homebrew/bin ahead of anything
+# _child_env() sets — so a bare `claude` silently ran Homebrew's 2.1.98 while
+# ~/.local/bin held 2.1.220. Four months of drift, invisible from inside the app.
+#
+# That is a correctness problem, not a cosmetic one: the planned stream-json and
+# hook work depends on feature availability and event shapes that moved across
+# those versions, and it would have been developed against one version while
+# being tested against another in a normal terminal.
+_DEFAULT_CLAUDE_BIN = "~/.local/bin/claude"
+
+
+def _resolve_claude_bin() -> str:
+    """Absolute path to the Claude Code binary to spawn, or bare 'claude'."""
+    path = os.path.expanduser(
+        os.environ.get("DAIMON_CLAUDE_BIN") or _DEFAULT_CLAUDE_BIN)
+    if os.path.isfile(path) and os.access(path, os.X_OK):
+        return path
+    # Falling back to PATH restores the drift this pin exists to prevent, so it
+    # is never silent — an unpinned session must be visibly unpinned.
+    print(f"  [term] no claude at {path} — falling back to PATH resolution",
+          flush=True)
+    return "claude"
+
+
+def _log_claude_version(path: str) -> None:
+    """Report the resolved binary and its version once, off the spawn path.
+
+    Probed in a thread: a silently-wrong version is indistinguishable from a
+    correct one until it isn't, but finding that out must not delay the session.
+    """
+    def _probe() -> None:
+        try:
+            out = subprocess.run([path, "--version"], capture_output=True,
+                                 text=True, timeout=10)
+            raw = (out.stdout or out.stderr).strip().splitlines()
+            version = raw[0] if raw else "version unknown"
+        except Exception as exc:
+            version = f"version probe failed: {exc}"
+        print(f"  claude  → {path}  ({version})", flush=True)
+
+    threading.Thread(target=_probe, daemon=True, name="daimon-claude-ver").start()
 
 
 # ── Build environment with expanded PATH ─────────────────────────────────────
@@ -83,11 +129,14 @@ class TermSession:
     def start(self) -> None:
         import pty
         env = _child_env()
-        # Use login shell so PATH and nvm/etc. are configured; exec replaces it
-        # with claude so the PTY shows the claude session directly.
-        # The settings JSON is shell-quoted: zsh -c re-parses this string, and an
+        # Still a login shell — node/nvm and friends need it — but the binary is
+        # named absolutely, so .zprofile no longer gets to choose the version.
+        # Both arguments are shell-quoted: zsh -c re-parses this string, and an
         # unquoted payload loses its double quotes and reaches claude as a path.
-        cmd = ["zsh", "-l", "-c", f"exec claude --settings {shlex.quote(_QUIET_SETTINGS)}"]
+        claude_bin = _resolve_claude_bin()
+        cmd = ["zsh", "-l", "-c",
+               f"exec {shlex.quote(claude_bin)} "
+               f"--settings {shlex.quote(_QUIET_SETTINGS)}"]
 
         self.pid, self.fd = pty.fork()
 
@@ -109,6 +158,7 @@ class TermSession:
             os._exit(1)
 
         # ── Parent ─────────────────────────────────────────────────────────
+        _log_claude_version(claude_bin)
         _set_winsize(self.fd, self.cols, self.rows)
         self._alive = True
         self._thread = threading.Thread(
