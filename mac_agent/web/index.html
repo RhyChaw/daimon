@@ -648,15 +648,6 @@ function initGL() {
     // a touch shorter vertically.
     globeHolder.scale.set(1.45*1.32, 1.45*0.92, 1.45*1.32);
 
-    // Glowing white core: the earth texture has cyan land over a transparent
-    // ocean, so a bright sphere just inside the cage turns the "black ball" white
-    // while the continents/grid stay cyan on top.
-    const core=new THREE.Mesh(
-      new THREE.SphereGeometry(0.555,64,64),
-      new THREE.MeshBasicMaterial({ color:0xcfe6ff })
-    );
-    globeHolder.add(core);
-
     if(gltf.animations && gltf.animations.length){
       mixer=new THREE.AnimationMixer(model);
       gltf.animations.forEach(c=>mixer.clipAction(c).play());
