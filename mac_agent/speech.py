@@ -79,9 +79,22 @@ def start_sidecar(python_bin=None, socket_path=None, voice=None, device=None):
         python_bin or os.environ.get("DAIMON_TTS_PYTHON") or _DEFAULT_TTS_PYTHON)
     socket_path = os.path.expanduser(
         socket_path or os.environ.get("DAIMON_TTS_SOCKET") or _DEFAULT_TTS_SOCKET)
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "scripts", "tts_sidecar.py")
+    # resources.script_path(), NOT a join on __file__. py2app puts mac_agent
+    # inside Resources/lib/pythonX.Y/, and a manual __file__ join resolves to a
+    # path that does not exist in the frozen bundle — so the .app would have
+    # silently used `say` forever while dev runs looked fine. This is the same
+    # resolver the AppleScripts use.
+    from .resources import script_path as _script_path
+    try:
+        script_path = _script_path("tts_sidecar.py")
+    except FileNotFoundError:
+        script_path = ""
     if not os.path.exists(python_bin) or not os.path.exists(script_path):
+        # Degrading to `say` is correct — but say which, because a missing venv
+        # and a broken sidecar are otherwise indistinguishable from outside,
+        # and both simply sound like the old voice.
+        print(f"[tts] no sidecar venv at {python_bin} — using /usr/bin/say",
+              flush=True)
         return None
     sidecar = KokoroPlayer(socket_path, python_bin, script_path,
                            voice=voice or os.environ.get("DAIMON_TTS_VOICE"),

@@ -328,12 +328,21 @@ assertion.
 
 ### Environment pins
 
-- **Sidecar venv is Python 3.12.** System `python3` here is 3.14.5. 3.13 fails: `spacy` →
-  `thinc` → `blis` has no cp313 wheel and its source build dies in Cython
-  (`CompileError: blis/py.pyx`). 3.12 installs clean. Verified working set: kokoro 0.9.4,
-  misaki 0.9.4, torch 2.13.0, numpy 2.5.1, spacy 3.8.14. (The `numpy==1.26.4` hard pin
-  that constrained 0.7.16 is **gone** in 0.9.4 — the interpreter constraint is spaCy's,
-  not numpy's.)
+- **Sidecar venv is Python 3.12, at `~/.daimon/tts-venv`. Do not "fix" this to 3.13.**
+  An earlier draft of this plan specified 3.13; that predated the finding below and is
+  wrong. 3.13 fails: `spacy` → `thinc` → `blis` has no cp313 wheel and its source build
+  dies in Cython (`CompileError: blis/py.pyx`). A source build dying in Cython is not
+  worth fighting.
+
+  **The constraint that actually matters is "outside the bundle, not the system
+  interpreter"** — system `python3` here is 3.14.5, and using it would drag torch into
+  the bundle's dependency set. 3.12 satisfies that constraint completely; the exact minor
+  version is not load-bearing and is not worth revisiting.
+
+  `~/.daimon/` is already the memory directory, so the sidecar venv sits beside existing
+  state rather than in the repo. Verified working set: kokoro 0.9.4, misaki 0.9.4,
+  torch 2.13.0, numpy 2.5.1, spacy 3.8.14. (The `numpy==1.26.4` hard pin that constrained
+  0.7.16 is **gone** in 0.9.4 — the interpreter constraint is spaCy's, not numpy's.)
 - **`espeak-ng` must be installed *and explicitly wired up*** — see the silent-truncation
   section. Installed here 2026-08-03: eSpeak NG 1.52.0, `/opt/homebrew/bin/espeak-ng`.
 - Kokoro's own deps carry **no audio output library** — it does not play audio at all.
@@ -526,6 +535,50 @@ Post-fix, against the real sidecar: mid-playback `stop()` **2–7 ms**, mid-synt
 **139–146 ms** (bounded by synthesis finishing; no audio is produced at all), sidecar
 healthy across every trial, `cancelled=True` reported correctly.
 
+**Bug 3 is bug MUST 3 one level down: the bounded-stop requirement is RECURSIVE.**
+`stop()` is bounded so it cannot hang — and then the transport it uses to be bounded
+introduced a hang of its own. Every layer that can block has to be bounded, and *the
+transport layer is a layer*. When adding any new blocking call beneath `stop()`, ask what
+bounds it; "the layer above has a timeout" is not an answer, because the layer above is
+waiting on the thing that deadlocked.
+
+### The socketpair tests are necessary and NOT sufficient
+
+**All three bugs above passed the socketpair unit tests.** Every one of them lives in the
+gap between "both ends of a socket in one process" and "a real subprocess with a real read
+loop":
+
+- an in-process fake has no separate read loop to block, so inline `speak` looks fine;
+- a fake answers instantly, so waiting for the wrong frame never blows a grace;
+- a fake's reader is not usually blocked in `readline()` at the moment you close it.
+
+Keep the socketpair tests — they are fast, silent, and they pin the protocol. But
+**anything touching `stop()`, readiness, or the completion contract must get an
+end-to-end run against a real sidecar before it is believed.** In-process fakes pass tests
+that a real process boundary fails.
+
+**This bites hardest in step 7**, which adds the first caller of `stop()` in anger and
+will exercise exactly these paths under real timing. `stop()` is *tested but not proven in
+situ*; step 7 is where it earns mileage.
+
+**4. Locate the sidecar script with `resources.script_path()`, never a `__file__` join.**
+py2app puts `mac_agent` inside `Resources/lib/pythonX.Y/`, so a manual
+`os.path.dirname(__file__)/scripts/...` resolves to a path that does not exist in the
+frozen bundle. The `.app` would have silently used `say` forever while every dev run
+looked perfect — the exact silent-degradation shape this step keeps having to design
+against. `resources.py` already solves this for the AppleScripts; use it.
+
+Bundle behaviour confirmed: `.py` is in `launcher.py`'s `_SYNCABLE` set, so
+`tts_sidecar.py` syncs in with `Synced 5 Python file(s) into bundle zip (no rebuild
+needed)` and lands at `Resources/lib/python3.14/mac_agent/scripts/`, which is exactly what
+`resources.scripts_dir()` returns when frozen.
+
+(Aside, so it is not mistaken for a regression later: `codesign --verify --deep --strict`
+reports "a sealed resource is missing or invalid" on the synced bundle. That **predates
+this session** — five bundle `.py` files carry mtimes from steps 1 and 3's syncs — and is
+inherent to sync-without-rebuild. The executable's code directory, which is what TCC keys
+on, is untouched. That is the whole point of syncing rather than rebuilding.)
+
 ### The trailing silence is FIXED-LENGTH — measured, decision still open
 
 Answering the Phase C question directly, over 145 warm chunks:
@@ -543,6 +596,27 @@ reason MUST 2 holds today; trimming shrinks it to roughly `stream.latency`. That
 change to the invariant flagged as most fragile, so it needs its own loopback
 re-verification rather than riding along with the engine swap — the same one-variable
 argument that kept `MAX_CHARS` at 120.
+
+**OPEN DECISION, with the re-verification requirement attached: trimming requires a fresh
+loopback measurement of the completion margin — not a code review.** Reasoning that the
+trim "obviously" preserves MUST 2 is exactly the kind of claim this project has twice
+measured and found wrong. ~10 s on a 22-chunk utterance is real value and it should get
+done; it just must not be bundled into a step whose attribution would be lost.
+
+### Harness rule: never pipe a long-running command's output to a file
+
+Twice this session a healthy run was read as a hang — once through `grep`, once through
+`tail` — because **both block-buffer when stdout is not a terminal.** Progress lines sat
+unflushed in the filter's buffer while the output file stayed empty. The first incident
+cost a completed 155-chunk measurement run, killed on the false belief it had wedged.
+
+Pick one and stick to it:
+
+- don't pipe at all (filter in Python, or let the program write what you want to read);
+- `stdbuf -oL <cmd> | grep ...` to force line buffering;
+- or redirect to a file and `tail` it in a *separate* command.
+
+An empty output file is not evidence of a hang. Check the process, not the file.
 
 ### Step 4 must-do list
 

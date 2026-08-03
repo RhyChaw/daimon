@@ -99,6 +99,33 @@ against the latency curve — validate by listening to a multi-chunk utterance u
 proposed variable scheme, and treat audible voice drift across chunk boundaries as
 disqualifying however good the latency looks.
 
+## A content finding, not a latency one: Daimon reads file paths aloud
+
+The two slowest chunks in the whole corpus — 133 chars, **17.4 s of audio each**, versus
+the ~7 s their length predicts — are filesystem paths that leaked into an error message:
+
+```
+/Users/…/dist/Daimon.app/Contents/Resources/lib/python3.14/mac_agent/scripts/
+read_calendar.applescript:215:221:
+```
+
+Kokoro pronounces them **character by character**. Nobody wants to hear a path spelled
+out, and this is what "why did it just talk for twenty seconds" looks like from the
+inside.
+
+Two things worth separating:
+
+- **Paths and URLs want different treatment from prose.** Elide, summarise, or route them
+  to a panel rather than speaking them. This is a splitter/router decision, not a latency
+  one — shortening the chunk budget would just spell the path across more chunks.
+- **The upstream question is why a raw path is in a spoken string at all.** These came
+  from an `osascript` failure surfaced verbatim. Error text destined for speech probably
+  wants a spoken form and a displayed form, which is adjacent to the `origin` taxonomy
+  below.
+
+Note this distorts the measured tail: those two chunks are the only ones above 8 s of
+audio, and they are why `CHUNK_TIMEOUT` is 45 s rather than ~25 s.
+
 ## Also relevant to the router
 
 §4.2 puts a hosted tier alongside the local one, keyed on `origin` and length. The

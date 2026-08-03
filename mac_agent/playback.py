@@ -190,6 +190,17 @@ _SIDECAR_STOP_GRACE = 0.5
 _SIDECAR_ACK_TIMEOUT = 2.0
 
 
+def _log(message):
+    """Which backend is live, on one line.
+
+    Falling back to `say` is correct behaviour when the sidecar is absent — but
+    correct-and-silent is indistinguishable from broken-and-silent, and this
+    layer's whole design stance is that failures should be visible. A panel
+    comes later; a line is enough now.
+    """
+    print(f"[tts] {message}", flush=True)
+
+
 class KokoroHandle:
     """A handle to one chunk in flight inside the sidecar.
 
@@ -392,19 +403,30 @@ class KokoroPlayer:
                     continue          # library banners on stdout; ignore
                 if msg.get("ev") == "ready":
                     self._ready.set()
+                    _log(f"kokoro sidecar ready in {msg.get('load_s')}s "
+                         f"(voice {msg.get('voice')}) — speech switches from "
+                         "`say` to kokoro now")
                     return
         except (OSError, ValueError):
             pass
         # stdout closed without ready: the sidecar failed to start. Most likely
         # the espeak check refused, which is the intended behaviour -- running
         # with unk='' would silently drop words. Stay unready; play() falls back.
+        #
+        # Say so. Falling back to `say` is correct behaviour, but silence here
+        # is indistinguishable from a broken sidecar, and the whole point of
+        # the espeak refusal is that failures are visible rather than silent.
+        _log("sidecar did not become ready — speech stays on /usr/bin/say")
 
     def shutdown(self):
         with self._lock:
             proc, self._proc = self._proc, None
+        was_ready = self._ready.is_set()
         self._ready.clear()
         if proc is None:
             return
+        if was_ready:
+            _log("sidecar stopped — speech falls back to /usr/bin/say")
         try:
             proc.terminate()
             proc.wait(timeout=_STOP_GRACE)
