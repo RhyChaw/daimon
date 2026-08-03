@@ -511,11 +511,25 @@ const _TERM_THEME = {
   cursor:              "#7799ff",
   cursorAccent:        "#030308",
   selectionBackground: "rgba(95,135,255,0.22)",
-  black:   "#1a1a2e", red:     "#ff6b6b", green:   "#4ecdc4", yellow:  "#ffe66d",
-  blue:    "#6c8ebf", magenta: "#c792ea", cyan:    "#89ddff", white:   "#d2d8f0",
-  brightBlack:   "#3a3a5c", brightRed:     "#ff8a80", brightGreen:   "#69f0ae",
-  brightYellow:  "#ffd740", brightBlue:    "#82b1ff", brightMagenta: "#e040fb",
-  brightCyan:    "#a0dfe4", brightWhite:   "#ffffff",
+
+  // Daimon's palette, not the default 16-colour table. The interface is cold —
+  // #030308 ground, #d2d8f0 text, #5d7bff accent — and the terminal was sitting
+  // in it with warm yellows and a terminal green, which is most of why the
+  // session read as somebody else's software.
+  //
+  //   cyan family  output, paths, structure — the default voice of the panel
+  //   blue         prompts and cursors, the existing #5d7bff/#7799ff accent
+  //   amber        warnings only. Nothing routine gets to be amber, or the one
+  //                colour that should mean "look at this" stops meaning it.
+  //   red          errors. Cooled off the stock red so it belongs to this
+  //                interface, still unmistakably red.
+  //   green        kept as teal: diff additions must stay readable as additions,
+  //                but terminal green is the single warmest thing on screen.
+  black:   "#10131f", red:     "#ff5c72", green:   "#35d6bc", yellow:  "#f0a830",
+  blue:    "#6f8aff", magenta: "#b48cff", cyan:    "#74d0f0", white:   "#d2d8f0",
+  brightBlack:   "#3a4160", brightRed:     "#ff8497", brightGreen:   "#5ce8cf",
+  brightYellow:  "#ffc65c", brightBlue:    "#8fa6ff", brightMagenta: "#cba6ff",
+  brightCyan:    "#a8e6ff", brightWhite:   "#ffffff",
 };
 
 function _mountTerm() {
