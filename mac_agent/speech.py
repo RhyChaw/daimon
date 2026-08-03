@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 import threading
 
+from .chunking import split_utterance
+
 _SAY_BIN = "/usr/bin/say"
 _QUEUE = queue.Queue()
 _WORKER_LOCK = threading.Lock()
@@ -59,8 +61,14 @@ def _ensure_worker():
 
 
 def speak(text):
-    """Queue text for speech; waits behind any in-progress utterance."""
+    """Queue text for speech, one queue item per speakable chunk.
+
+    Chunking is what gives playback a clean place to stop mid-utterance. It
+    does not reduce time-to-first-audio — no backend streams, so the whole
+    utterance already exists before the first chunk is queued.
+    """
     if _MUTED:
         return
     _ensure_worker()
-    _QUEUE.put(text)
+    for chunk in split_utterance(text):
+        _QUEUE.put(chunk)

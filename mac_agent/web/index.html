@@ -750,7 +750,7 @@ const daimon = {
     applyStateExtras(state);
     if(state==="idle")setTimeout(()=>{chipsEl.innerHTML="";},800);
   },
-  say(text)                 { _appendMsg(text,"msg-daimon"); speakDaimon(text); },
+  say(text,chunks)          { _appendMsg(text,"msg-daimon"); speakDaimon(text,chunks); },
   proposeAction(verb,risk)  {
     const c=document.createElement("div");
     c.className=`chip chip-${risk}`;
@@ -788,7 +788,7 @@ function connect() {
         else if(msg.state!=="listening"){ serverBusy=true; }
         daimon.setState(msg.state);
         break;
-      case "say":        daimon.say(msg.text);                    break;
+      case "say":        daimon.say(msg.text,msg.chunks);         break;
       case "action":     daimon.proposeAction(msg.verb,msg.risk); break;
       case "gate":       daimon.requestGate(msg.label);           break;
       case "gate_close": daimon.closeGate();                      break;
@@ -915,19 +915,28 @@ function _maybeResume(){
   }
 }
 
-function speakDaimon(text){
-  if(!convoMode || !_synth || !text) return;
+// Speaks the server-supplied chunks. The splitter lives server-side
+// (mac_agent/chunking.py) and ships its output in the say event, so this path
+// never re-implements it — and never truncates. It used to cut every utterance
+// at 600 chars, silently dropping the tail of any long answer.
+function speakDaimon(text,chunks){
+  if(!convoMode || !_synth) return;
+  const parts=(chunks&&chunks.length)?chunks:(text?[String(text)]:[]);
+  if(!parts.length) return;
   _stopListen();                       // never let the mic hear Daimon's own voice
   speaking=true;
   daimon.setState("speaking");
-  const u=new SpeechSynthesisUtterance(String(text).slice(0,600));
-  u.lang="en-US"; u.rate=1.03; u.pitch=1.0;
-  u.onend=()=>{
+  const done=()=>{
     if(_synth.speaking || _synth.pending) return;  // more queued — stay "speaking"
     speaking=false;
     _maybeResume();
   };
-  try{ _synth.speak(u); }catch(_){ speaking=false; _maybeResume(); }
+  for(const part of parts){
+    const u=new SpeechSynthesisUtterance(part);
+    u.lang="en-US"; u.rate=1.03; u.pitch=1.0;
+    u.onend=done;
+    try{ _synth.speak(u); }catch(_){ speaking=false; _maybeResume(); return; }
+  }
 }
 
 function startConvo(){

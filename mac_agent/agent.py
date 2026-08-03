@@ -21,6 +21,7 @@ from . import memory
 from . import episodic
 from . import palace_memory
 from . import clock
+from .chunking import split_utterance
 from .senses import NeedsUserInput, ToolResult
 
 MAX_AGENT_STEPS = 5
@@ -156,6 +157,22 @@ def _sense_action(text):
     return None
 
 
+def _emit_say(text, origin):
+    """Emit the WS say event: whole utterance for the transcript, chunks for audio.
+
+    One payload rather than two paths, so the browser never re-implements the
+    splitter and never has to truncate. `origin` is what the step-6 TTS router
+    keys on alongside length — system utterances are Daimon's own fixed or
+    derived phrases, prose is model-generated answer text.
+    """
+    events.emit({
+        "type": "say",
+        "text": text,
+        "chunks": split_utterance(text),
+        "origin": origin,
+    })
+
+
 def _say(text):
     if not _music_played_this_turn:
         ACTION_SCHEMA["say"]["handler"](text=text)
@@ -166,7 +183,7 @@ def _music_say(text):
     """Show confirmation in console/UI without TTS — avoids pausing Spotify."""
     print(f"  -> {text}")
     events.emit({"type": "state", "state": "speaking"})
-    events.emit({"type": "say", "text": text})
+    _emit_say(text, "system")
     log(action="say", args={"text": text}, decision="allowed", auth_method="auto", ok=True)
 
 
@@ -386,7 +403,7 @@ def _try_direct_say(user_text):
     print(f"  -> proposed: say({json.dumps(args, ensure_ascii=False)})   [risk: auto]")
     events.emit({"type": "action", "verb": "say", "risk": "auto"})
     events.emit({"type": "state", "state": "speaking"})
-    events.emit({"type": "say", "text": text})
+    _emit_say(text, "prose")
     try:
         ACTION_SCHEMA["say"]["handler"](**args)
         print("  ok")
@@ -596,7 +613,7 @@ def _execute_step(user_text, action, args):
         text = args.get("text", "")
         print(f"  -> {text}")
         events.emit({"type": "state", "state": "speaking"})
-        events.emit({"type": "say", "text": text})
+        _emit_say(text, "prose")
         try:
             if not _music_played_this_turn:
                 handler = getattr(actions_mod, spec["handler"].__name__)
