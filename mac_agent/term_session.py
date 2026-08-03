@@ -74,12 +74,17 @@ def _resolve_claude_bin() -> str:
     return "claude"
 
 
-def _log_claude_version(path: str) -> None:
-    """Report the resolved binary and its version once, off the spawn path.
+def _log_session_context(path: str, key_withheld: bool) -> None:
+    """Report which binary and which account a session is about to use.
 
-    Probed in a thread: a silently-wrong version is indistinguishable from a
-    correct one until it isn't, but finding that out must not delay the session.
+    Three silently-degraded-but-plausible modes have now shown up here — the TTS
+    backend, the Claude Code version, and which account gets billed. All three
+    looked like working sessions from the outside. Version is probed in a thread
+    so finding out never delays the spawn.
     """
+    auth = ("claude.ai session (ANTHROPIC_API_KEY withheld from PTY)"
+            if key_withheld else "inherited (no ANTHROPIC_API_KEY in environment)")
+
     def _probe() -> None:
         try:
             out = subprocess.run([path, "--version"], capture_output=True,
@@ -89,6 +94,7 @@ def _log_claude_version(path: str) -> None:
         except Exception as exc:
             version = f"version probe failed: {exc}"
         print(f"  claude  → {path}  ({version})", flush=True)
+        print(f"  auth    → {auth}", flush=True)
 
     threading.Thread(target=_probe, daemon=True, name="daimon-claude-ver").start()
 
@@ -103,6 +109,14 @@ def _child_env() -> dict:
     # Silences "Update available! Run: brew upgrade claude-code" inside the panel.
     # Scoped to this child: it does not stop the user updating Claude Code normally.
     env["DISABLE_AUTOUPDATER"] = "1"
+    # Daimon's own Anthropic client needs ANTHROPIC_API_KEY, and load_dotenv() puts
+    # it in the process environment — from where every PTY session inherited it.
+    # Claude Code prefers an API key over claude.ai credentials, so each embedded
+    # session metered per-token against the API account instead of the Max plan
+    # already being paid for, and disabled claude.ai connectors as a side effect.
+    # Both looked exactly like a working session. Withholding it here is scoped to
+    # the child: the parent keeps its key and Daimon's own client is unaffected.
+    env.pop("ANTHROPIC_API_KEY", None)
     # Prepend common locations where `claude` may be installed.
     extras = [
         f"{home}/.claude/local",
@@ -158,7 +172,7 @@ class TermSession:
             os._exit(1)
 
         # ── Parent ─────────────────────────────────────────────────────────
-        _log_claude_version(claude_bin)
+        _log_session_context(claude_bin, bool(os.environ.get("ANTHROPIC_API_KEY")))
         _set_winsize(self.fd, self.cols, self.rows)
         self._alive = True
         self._thread = threading.Thread(
