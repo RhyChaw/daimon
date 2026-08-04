@@ -657,7 +657,19 @@ function initGL() {
 
   scene=new THREE.Scene();
   camera=new THREE.PerspectiveCamera(34,1,0.1,100);
-  camera.position.set(0,0,3.9);
+  // z=5.95, not 3.9. The canvas box is much taller than wide (aspect 0.676), so
+  // the horizontal half-extent — tan(fov/2)*z*aspect — was 0.81 world units
+  // against a globe reaching 1.225, and the globe was cropped left and right.
+  // Pulling back to 5.95 puts it at 1.231, just clear.
+  //
+  // The alternative was shortening the canvas box to raise its aspect. Both fix
+  // the crop, and both render the globe at the same size — 153.5 vs 152.7 px per
+  // world unit, because the frustum grows in both axes, so there is no size
+  // trade. They differ on the beam: a shorter box cuts the cone off just below
+  // the globe, while pulling back grows the vertical half-extent from 1.19 to
+  // 1.82 and lets it descend in full. The beam is what makes this read as
+  // projected rather than pasted.
+  camera.position.set(0,0,5.95);
 
   // Subtle image-based light so the earth's base-colour map reads; the cyan shell
   // is emissive and lights itself.
