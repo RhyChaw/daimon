@@ -23,14 +23,19 @@ html { height: 100%; -webkit-text-size-adjust: none; text-size-adjust: none; }
   --bg: #030308;
   --text: #d2d8f0;
   --text-dim: rgba(180,185,220,0.34);
-  --orb: 250px;
+  /* --stage IS the rail width — one knob, everything else derived from it.
+     Previously --orb, --stage and --mote-r were three independent numbers that
+     happened to look right together at one size, and stopped agreeing the
+     moment any of them moved. --orb x 1.15 is the canvas width (see
+     #orb-canvas), so 0.86 puts the globe at very nearly the full rail. */
   --stage: 380px;
-  --mote-r: 112px;
+  --orb: calc(var(--stage) * 0.86);
+  --mote-r: calc(var(--stage) * 0.30);
   --font-display: 'Syne', system-ui, sans-serif;
   --font-body: 'Inter', -apple-system, sans-serif;
 }
 @media (max-width: 480px) {
-  :root { --orb: 190px; --stage: 290px; --mote-r: 86px; }
+  :root { --stage: 290px; }
 }
 
 body {
@@ -123,13 +128,18 @@ body::before {
 @keyframes conn-pulse { 0%,100%{opacity:1;} 50%{opacity:0.45;} }
 
 /* ── Wordmark ───────────────────────────────────────────────────────────── */
+/* Top of the rail, above the globe. The rail is what says "this is Daimon" —
+   globe, state, identity, status — so the wordmark belongs with them rather
+   than floating centered over the terminal column. Scales with the rail so it
+   stays readable at 380 without overflowing at 220. */
 #wordmark {
   font-family: var(--font-display);
-  font-size: 10.5px; font-weight: 700;
+  font-size: clamp(8.5px, calc(var(--stage) * 0.028), 12px);
+  font-weight: 700;
   letter-spacing: 0.30em; text-transform: uppercase;
   color: rgba(150,160,210,0.18);
-  padding-top: max(20px, env(safe-area-inset-top, 20px));
-  flex-shrink: 0; z-index: 1; user-select: none;
+  padding: max(14px, env(safe-area-inset-top, 14px)) 0 2px;
+  flex-shrink: 0; z-index: 1; user-select: none; text-align: center;
 }
 
 /* ── Workspace ──────────────────────────────────────────────────────────── */
@@ -159,15 +169,22 @@ body::before {
    and it competes for attention with the globe's own state animation without
    communicating anything. The globe is where this interface spends motion;
    everything else animating is subtracting from it. */
+/* No size override when a session opens. The 72px orb and 120px stage were
+   tuned for a transient shrunken state under a centered wordmark; as the
+   permanent anchor of a left rail they read as a status LED with a terminal
+   next to it. The rail is one width, always. */
 body.term-active #stage { gap: 10px; }
-body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
 
+/* Height tracks the canvas rather than the rail: the model is a globe with a
+   beam hanging below it, so its box is much taller than wide and the old
+   stage x 1.12 clipped the beam. No size transition — animating a canvas's
+   box is a resolution change mid-flight, which is worse than merely animating
+   a layout property. */
 #orb-outer {
-  width: var(--stage); height: calc(var(--stage) * 1.12);
+  width: var(--stage); height: calc(var(--orb) * 1.7);
   position: relative;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  transition: width 0.35s ease, height 0.35s ease;
 }
 /* Soft state-coloured glow behind the hologram (the model itself isn't round). */
 #orb-glow {
@@ -183,7 +200,6 @@ body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
   will-change: transform;
   transform-origin: center;
   cursor: default;
-  transition: width 0.35s ease, height 0.35s ease;
 }
 #orb-canvas.no-webgl {
   width: var(--orb); height: var(--orb); border-radius: 50%;
@@ -426,8 +442,6 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 </head>
 <body>
 
-<p id="wordmark">Daimon</p>
-
 <!-- Gate -->
 <div id="gate-overlay">
   <div id="gate-card">
@@ -440,8 +454,9 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 <!-- Workspace: globe rail | terminal -->
 <div id="workspace">
 
-  <!-- Rail: globe, state label, then connection + model pinned to the foot -->
+  <!-- Rail: wordmark, globe, state label, then connection + model at the foot -->
   <div id="stage">
+    <p id="wordmark">Daimon</p>
     <div id="orb-outer">
       <div id="orb-glow"></div>
       <canvas id="orb-canvas"></canvas>
