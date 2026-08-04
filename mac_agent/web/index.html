@@ -55,11 +55,13 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* ── Status row (connection + model selector, centered above the input) ──── */
+/* ── Status row (connection + model selector — foot of the rail) ─────────── */
+/* margin-top:auto pins it to the bottom of the rail column. It wraps because
+   the rail is narrow and gets narrower when a session is open. */
 #status-row {
-  align-self: center; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  gap: 7px; margin: 0 auto 8px; z-index: 2;
+  margin-top: auto; flex-shrink: 0;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 7px; padding: 0 6px; z-index: 2;
 }
 #conn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -130,20 +132,31 @@ body::before {
   flex-shrink: 0; z-index: 1; user-select: none;
 }
 
-/* ── Stage ──────────────────────────────────────────────────────────────── */
+/* ── Workspace ──────────────────────────────────────────────────────────── */
+/* The row: globe rail on the left, terminal filling everything to its right.
+   Transcript and input bar live outside it and span under both. */
+#workspace {
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; flex-direction: row; align-items: stretch;
+  position: relative; z-index: 1;
+}
+
+/* ── Rail ───────────────────────────────────────────────────────────────── */
+/* The globe is a persistent status object, not a header — it holds position
+   while output scrolls beside it. Globe at the top, state label beneath it,
+   connection and model at the foot: all of it status about Daimon itself.
+   Rail width and --stage are the same number by inheritance here; 4b makes
+   that agreement deliberate. */
 #stage {
-  flex: 1; min-height: 0;
+  flex: 0 0 var(--stage);
+  min-width: 0;
   display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 18px; position: relative; z-index: 1;
-  transition: flex 0.35s ease, min-height 0.35s ease;
+  align-items: center; justify-content: flex-start;
+  gap: 18px; padding: 10px 0 8px;
+  position: relative; z-index: 1;
+  transition: flex-basis 0.35s ease;
 }
-body.term-active #stage {
-  flex: 0 0 auto;
-  min-height: 0;
-  gap: 10px;
-  padding-bottom: 4px;
-}
+body.term-active #stage { gap: 10px; }
 body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
 
 #orb-outer {
@@ -312,14 +325,18 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
    rather than as another product embedded in a window. The panel's own fill is
    only half of that — _TERM_THEME.background carries the rest, and is
    transparent for the same reason. */
+/* A row item now: flex-basis is its width, so the same 0 → grow transition that
+   used to open it downwards opens it sideways. min-width:0 is load-bearing —
+   without it the flex item refuses to shrink below its content width and the
+   rail gets pushed off screen. The old max-width:900px is gone: the terminal
+   fills whatever the rail leaves. */
 #term-panel {
-  width: 100%; max-width: 900px;
-  flex: 0 0 0px; overflow: hidden;
+  flex: 0 0 0px; min-width: 0; overflow: hidden;
   display: flex; flex-direction: column;
   z-index: 2;
   transition: flex-basis 0.35s ease;
 }
-#term-panel.visible { flex: 1 1 0; min-height: 200px; }
+#term-panel.visible { flex: 1 1 0; }
 
 /* The mask belongs on the container, not .xterm-viewport: the viewport is the
    scroller, so a mask there would travel with the content instead of holding
@@ -344,8 +361,9 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
 }
 
 /* ── Input bar ──────────────────────────────────────────────────────────── */
+/* Spans the full width, under both the rail and the terminal. */
 #input-bar {
-  width: 100%; max-width: 510px;
+  width: 100%;
   padding: 10px 18px max(20px, env(safe-area-inset-bottom, 20px));
   display: flex; align-items: flex-end; gap: 8px;
   flex-shrink: 0; z-index: 1;
@@ -416,37 +434,42 @@ body.term-active #transcript { max-height: 0; opacity: 0; pointer-events: none; 
   </div>
 </div>
 
-<!-- Orb -->
-<div id="stage">
-  <div id="orb-outer">
-    <div id="orb-glow"></div>
-    <canvas id="orb-canvas"></canvas>
-    <div class="mote"></div>
-    <div class="mote"></div>
-    <div class="mote"></div>
+<!-- Workspace: globe rail | terminal -->
+<div id="workspace">
+
+  <!-- Rail: globe, state label, then connection + model pinned to the foot -->
+  <div id="stage">
+    <div id="orb-outer">
+      <div id="orb-glow"></div>
+      <canvas id="orb-canvas"></canvas>
+      <div class="mote"></div>
+      <div class="mote"></div>
+      <div class="mote"></div>
+    </div>
+    <div id="state-label"></div>
+    <div id="chips"></div>
+    <div id="status-row">
+      <div id="conn"></div>
+      <div id="model-pill">
+        <select id="model-select" aria-label="Model">
+          <option value="claude">Claude</option>
+          <option value="ollama">Ollama</option>
+        </select>
+      </div>
+    </div>
   </div>
-  <div id="state-label"></div>
-  <div id="chips"></div>
+
+  <!-- Terminal (hidden until term_open; no chrome — see #term-panel) -->
+  <div id="term-panel">
+    <div id="term-container"></div>
+  </div>
+
 </div>
 
-<!-- Terminal (hidden until term_open; no chrome — see #term-panel) -->
-<div id="term-panel">
-  <div id="term-container"></div>
-</div>
-
-<!-- Transcript -->
+<!-- Transcript: unchanged — full width, above the input, collapses when the
+     terminal opens. Deliberately not in the rail: conversational content, and
+     a narrow column is the wrong shape for it. -->
 <div id="transcript"></div>
-
-<!-- Status row: connection + model selector (centered, just above the input) -->
-<div id="status-row">
-  <div id="conn"></div>
-  <div id="model-pill">
-    <select id="model-select" aria-label="Model">
-      <option value="claude">Claude</option>
-      <option value="ollama">Ollama</option>
-    </select>
-  </div>
-</div>
 
 <!-- Input (Daimon commands) -->
 <div id="input-bar">
