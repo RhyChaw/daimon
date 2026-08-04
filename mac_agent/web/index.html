@@ -981,9 +981,13 @@ if(_SR){
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-resizeCanvas();
 glReady=initGL();
 if(!glReady)canvas.classList.add("no-webgl");
+// After initGL, not before. resizeCanvas() early-returns while renderer is null,
+// so the original pre-initGL call did nothing and nothing called it again until
+// a window resize or a term open — meaning the globe rendered into WebGLRenderer's
+// 300×150 default buffer at aspect 1, stretched onto its CSS box, from first paint.
+resizeCanvas();
 window.addEventListener("resize",()=>{
   resizeCanvas();
   if(termPanelEl.classList.contains("visible")){
