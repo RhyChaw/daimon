@@ -211,12 +211,16 @@ body.term-active #stage { gap: 10px; }
 @keyframes css-breathe { 0%,100%{transform:scale(1);}50%{transform:scale(1.04);} }
 
 /* ── Motes ──────────────────────────────────────────────────────────────── */
+/* Sized as fractions of --orb for the same reason as the halo: these were 4px
+   and 6px against a 250px orb, and stayed 4px and 6px when the orb changed. */
 .mote {
-  position: absolute; width: 4px; height: 4px;
+  position: absolute;
+  width: calc(var(--orb) * 0.016); height: calc(var(--orb) * 0.016);
   border-radius: 50%; background: rgba(175,95,255,0.75);
-  top: 50%; left: 50%; margin: -2px 0 0 -2px;
+  top: 50%; left: 50%;
+  margin: calc(var(--orb) * -0.008) 0 0 calc(var(--orb) * -0.008);
   opacity: 0; pointer-events: none; z-index: 1;
-  box-shadow: 0 0 6px 2px rgba(175,95,255,0.55);
+  box-shadow: 0 0 calc(var(--orb) * 0.024) calc(var(--orb) * 0.008) rgba(175,95,255,0.55);
   transition: opacity 0.9s ease;
 }
 #orb-outer.moteing .mote { opacity: 1; }
@@ -700,7 +704,13 @@ function initGL() {
   return true;
 }
 
+// Pixel width of --orb. The halo radii are fractions of it, and this is the one
+// place that has to know the number — refreshed whenever the box changes rather
+// than measured per frame.
+let orbPx = 250;
+
 function resizeCanvas() {
+  orbPx = orbGlow.offsetWidth || orbPx;
   if(!renderer) return;
   const w=canvas.clientWidth||parseFloat(getComputedStyle(canvas).width)||180;
   const h=canvas.clientHeight||w;
@@ -711,15 +721,22 @@ function resizeCanvas() {
 
 // ── State params ──────────────────────────────────────────────────────────────
 const ST = {
-  idle:     {c1:[.27,.50,1.], c2:[.06,.13,.60], cr:[.56,.78,1.], turb:.09, spd:.13, rim:.55, pulseAmp:.026,pulsePer:3400,scale:1.00,motes:false, bRGB:[68,110,255], bA:.34,bR:52,bfA:.11,bfR:98},
-  listening:{c1:[.18,.94,.55], c2:[.04,.37,.22], cr:[.44,.98,.64], turb:.27, spd:.37, rim:.47, pulseAmp:.036,pulsePer:1600,scale:1.024,motes:false, bRGB:[50,210,120], bA:.42,bR:58,bfA:.13,bfR:108},
-  thinking: {c1:[.60,.18,1.], c2:[.17,.05,.57], cr:[.88,.47,1.], turb:.68, spd:.70, rim:.64, pulseAmp:.046,pulsePer:950, scale:1.00,motes:true,  bRGB:[145,55,255],  bA:.42,bR:63,bfA:.14,bfR:118},
-  acting:   {c1:[.08,.87,1.], c2:[.01,.27,.57], cr:[.27,.94,1.], turb:.44, spd:.51, rim:.51, pulseAmp:.036,pulsePer:760, scale:1.014,motes:false, bRGB:[28,195,240],  bA:.47,bR:60,bfA:.15,bfR:112},
-  speaking: {c1:[1.,.80,.22], c2:[.64,.31,.02], cr:[1.,.91,.54], turb:.21, spd:.31, rim:.47, pulseAmp:.050,pulsePer:1200,scale:1.01,motes:false, bRGB:[255,188,38],  bA:.47,bR:66,bfA:.15,bfR:122},
-  gate:     {c1:[1.,.51,.10], c2:[.57,.15,.02], cr:[1.,.71,.21], turb:.05, spd:.07, rim:.80, pulseAmp:.016,pulsePer:2200,scale:.940,motes:false,  bRGB:[240,118,28],  bA:.58,bR:36,bfA:.20,bfR:68},
+  // bR and bfR are FRACTIONS OF --orb, not pixels. They used to be absolute px
+  // tuned against a 250px centred orb, which is why the halo could end up larger
+  // than the object it belonged to: the globe shrank with the layout and the
+  // glow did not. Expressed as fractions they stay proportionate at any rail
+  // width — including whatever the multi-session rail turns out to need.
+  //
+  // 'rim' is gone: it was lerped every frame and never read by anything.
+  idle:     {c1:[.27,.50,1.], c2:[.06,.13,.60], cr:[.56,.78,1.], turb:.09, spd:.13, pulseAmp:.026,pulsePer:3400,scale:1.00,motes:false, bRGB:[68,110,255], bA:.34,bR:.208,bfA:.11,bfR:.392},
+  listening:{c1:[.18,.94,.55], c2:[.04,.37,.22], cr:[.44,.98,.64], turb:.27, spd:.37, pulseAmp:.036,pulsePer:1600,scale:1.024,motes:false, bRGB:[50,210,120], bA:.42,bR:.232,bfA:.13,bfR:.432},
+  thinking: {c1:[.60,.18,1.], c2:[.17,.05,.57], cr:[.88,.47,1.], turb:.68, spd:.70, pulseAmp:.046,pulsePer:950, scale:1.00,motes:true,  bRGB:[145,55,255],  bA:.42,bR:.252,bfA:.14,bfR:.472},
+  acting:   {c1:[.08,.87,1.], c2:[.01,.27,.57], cr:[.27,.94,1.], turb:.44, spd:.51, pulseAmp:.036,pulsePer:760, scale:1.014,motes:false, bRGB:[28,195,240],  bA:.47,bR:.240,bfA:.15,bfR:.448},
+  speaking: {c1:[1.,.80,.22], c2:[.64,.31,.02], cr:[1.,.91,.54], turb:.21, spd:.31, pulseAmp:.050,pulsePer:1200,scale:1.01,motes:false, bRGB:[255,188,38],  bA:.47,bR:.264,bfA:.15,bfR:.488},
+  gate:     {c1:[1.,.51,.10], c2:[.57,.15,.02], cr:[1.,.71,.21], turb:.05, spd:.07, pulseAmp:.016,pulsePer:2200,scale:.940,motes:false,  bRGB:[240,118,28],  bA:.58,bR:.144,bfA:.20,bfR:.272},
 };
 
-function cloneState(s){return{c1:[...s.c1],c2:[...s.c2],cr:[...s.cr],turb:s.turb,spd:s.spd,rim:s.rim,scale:s.scale,bRGB:[...s.bRGB],bA:s.bA,bR:s.bR,bfA:s.bfA,bfR:s.bfR};}
+function cloneState(s){return{c1:[...s.c1],c2:[...s.c2],cr:[...s.cr],turb:s.turb,spd:s.spd,scale:s.scale,bRGB:[...s.bRGB],bA:s.bA,bR:s.bR,bfA:s.bfA,bfR:s.bfR};}
 const cur=cloneState(ST.idle);
 let tgtName="idle", prevName="idle";
 let nudgePos=0, nudgeVel=0, focusBoost=0;
@@ -747,7 +764,6 @@ function draw(now) {
   lv(cur.c1,tgt.c1,LR);lv(cur.c2,tgt.c2,LR);lv(cur.cr,tgt.cr,LR);
   cur.turb=ln(cur.turb,tgt.turb,LR*.78);
   cur.spd =ln(cur.spd, tgt.spd, LR*.70);
-  cur.rim =ln(cur.rim, tgt.rim, LR);
   cur.scale=ln(cur.scale,tgt.scale,LR);
   lv(cur.bRGB,tgt.bRGB,LR*.8);
   cur.bA=ln(cur.bA,tgt.bA,LR);cur.bR=ln(cur.bR,tgt.bR,LR);
@@ -763,9 +779,12 @@ function draw(now) {
   canvas.style.transform=`scale(${totalScale.toFixed(4)})`;
 
   const[r,g,b]=cur.bRGB.map(v=>Math.round(v));
+  // bR/bfR are fractions of --orb; orbPx is refreshed in resizeCanvas rather
+  // than measured here, since reading offsetWidth every frame forces layout.
+  const bR=cur.bR*orbPx, bfR=cur.bfR*orbPx;
   orbGlow.style.boxShadow=[
-    `0 0 ${cur.bR.toFixed(1)}px ${(cur.bR*.28).toFixed(1)}px rgba(${r},${g},${b},${cur.bA.toFixed(3)})`,
-    `0 0 ${cur.bfR.toFixed(1)}px ${(cur.bfR*.32).toFixed(1)}px rgba(${r},${g},${b},${cur.bfA.toFixed(3)})`,
+    `0 0 ${bR.toFixed(1)}px ${(bR*.28).toFixed(1)}px rgba(${r},${g},${b},${cur.bA.toFixed(3)})`,
+    `0 0 ${bfR.toFixed(1)}px ${(bfR*.32).toFixed(1)}px rgba(${r},${g},${b},${cur.bfA.toFixed(3)})`,
   ].join(",");
 
   if(!glReady||!renderer)return;
