@@ -527,7 +527,11 @@ const _TERM_THEME = {
   //                but terminal green is the single warmest thing on screen.
   black:   "#10131f", red:     "#ff5c72", green:   "#35d6bc", yellow:  "#f0a830",
   blue:    "#6f8aff", magenta: "#b48cff", cyan:    "#74d0f0", white:   "#d2d8f0",
-  brightBlack:   "#3a4160", brightRed:     "#ff8497", brightGreen:   "#5ce8cf",
+  // brightBlack carries dim text — line numbers, stack frames, secondary
+  // detail. A stack frame under an error is often the most useful text on
+  // screen, so this gets read, not glanced past. Legibility wins over hierarchy
+  // where they conflict: still clearly subordinate to #d2d8f0, but no squinting.
+  brightBlack:   "#6e7a9e", brightRed:     "#ff8497", brightGreen:   "#5ce8cf",
   brightYellow:  "#ffc65c", brightBlue:    "#8fa6ff", brightMagenta: "#cba6ff",
   brightCyan:    "#a8e6ff", brightWhite:   "#ffffff",
 };
