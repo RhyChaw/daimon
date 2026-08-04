@@ -154,8 +154,11 @@ body::before {
   align-items: center; justify-content: flex-start;
   gap: 18px; padding: 10px 0 8px;
   position: relative; z-index: 1;
-  transition: flex-basis 0.35s ease;
 }
+/* No width transition. The rail resizing is not a moment that needs narrating,
+   and it competes for attention with the globe's own state animation without
+   communicating anything. The globe is where this interface spends motion;
+   everything else animating is subtracting from it. */
 body.term-active #stage { gap: 10px; }
 body.term-active { --orb: 72px; --stage: 120px; --mote-r: 32px; }
 
