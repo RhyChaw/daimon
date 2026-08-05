@@ -681,6 +681,20 @@ function initGL() {
   scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
 
   globeHolder=new THREE.Group();
+  // Lifted, because the model is bottom-heavy but centred on its origin: the
+  // sphere sits at 0 and the rays/beam hang below it, so centring it in the
+  // frustum puts its empty half at the top. +0.4 world units moves most of that
+  // emptiness below the beam, closing the wordmark-to-globe distance from 157px
+  // to ~96px — near enough to read as a label belonging to the globe rather
+  // than a header floating above a gap.
+  //
+  // The binding constraint going further is the shell's UPPER dome against the
+  // top of the canvas, not the beam's tail: the beam survives +0.6 intact,
+  // while by +1.1 the dome is cut flat and the globe rides over the wordmark.
+  // So this value is composition-specific, not arbitrary. Anything added above
+  // the sphere later — a ring, an orbital element, a second label — spends the
+  // headroom this leaves, and wants re-checking against the canvas edge.
+  globeHolder.position.y = 0.4;
   scene.add(globeHolder);
 
   new GLTFLoader().load("/globe.glb", gltf=>{
